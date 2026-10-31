@@ -136,6 +136,7 @@ def get_raw_file(dsk_path, file_name, out_path, custom_ac=None):
 def put_file(dsk_path, file_name, file_type, addr, local_data_or_file, custom_ac=None):
     """Puts a file into DSK (-p). Auto-deletes existing file first."""
     import time
+    import tempfile
     delete_file(dsk_path, file_name, custom_ac=custom_ac)
 
     # If bytes/bytearray, write to a temp file
