@@ -1,0 +1,7 @@
+10 REM ========================================
+20 REM BOOT HELLO PROGRAM FOR APPLE2-WEB
+30 REM ========================================
+40 TEXT : HOME 
+50 VTAB 10: HTAB 6: PRINT "APPLE //e WEB CLIENT & BRIDGE"
+60 VTAB 12: HTAB 8: PRINT "LOADING WEBCLIENT.BAS..."
+70 PRINT CHR$(4);"RUN WEBCLIENT"

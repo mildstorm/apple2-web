@@ -1,0 +1,21 @@
+{
+  "name": "apple2-web",
+  "version": "1.0.0",
+  "description": "Apple II Super Serial Card (SSC) to Node.js HTTP Web Server & Serial-to-TCP/IP Bridge",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test_runner.js",
+    "build:dsk": "python build_dsk.py"
+  },
+  "keywords": ["apple2", "applewin", "ssc", "serial", "tcp", "http", "web"],
+  "author": "mildstorm",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "serialport": "^12.0.0"
+  }
+}
