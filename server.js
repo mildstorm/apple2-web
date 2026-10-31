@@ -234,6 +234,19 @@ bridge.on('command', ({ cmd, arg, raw }) => {
       bridge.sendLine('PONG! AppleWin SSC Bridge Active.');
       break;
 
+    case 'HELLO':
+    case 'HI': {
+      addHistory('RX', 'chat', `[Apple II]: ${raw}`);
+      broadcastWs({
+        event: 'chat_message',
+        sender: 'Apple II',
+        text: raw,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      bridge.sendLine('HELLO APPLE //e! Web Server is online.');
+      break;
+    }
+
     case 'CHAT':
     case 'MSG': {
       if (!arg) {
@@ -251,9 +264,18 @@ bridge.on('command', ({ cmd, arg, raw }) => {
       break;
     }
 
-    default:
-      bridge.sendLine(`OK: "${raw}" (Type HELP for list)`);
+    default: {
+      // Treat any text sent by Apple II as a chat broadcast to web
+      addHistory('RX', 'chat', `[Apple II]: ${raw}`);
+      broadcastWs({
+        event: 'chat_message',
+        sender: 'Apple II',
+        text: raw,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      bridge.sendLine(`OK: [Apple II] "${raw}" broadcasted.`);
       break;
+    }
   }
 });
 
