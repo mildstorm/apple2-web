@@ -1,189 +1,183 @@
-# Apple II Super Serial Card to Node.js HTTP Server & Serial-to-TCP/IP Bridge
+# Apple II Web - DOS 3.3 Disk File Manager, Hex Editor & 6502 Disassembler
 
-Apple II의 **Super Serial Card (SSC, Slot 2)**를 통해 Windows **Node.js HTTP 웹 서버**와 시리얼-TCP/IP 브릿지로 연동하여 실시간 양방향 통신 및 REST API 요청/응답을 수행하는 완전한 솔루션입니다.
+[![Platform](https://img.shields.io/badge/Platform-Apple%20II%20%2F%20%2F%2Fe-brightgreen)](https://github.com/mildstorm/apple2-web)
+[![Node.js](https://img.shields.io/badge/Node.js-v18%2B-blue)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+**apple2-web**은 모던 웹 브라우저(`http://localhost:3000`)에서 Apple II DOS 3.3 디스크 이미지(`.dsk`) 내의 파일들을 실시간으로 열람, 편집, 주입, 삭제할 수 있는 **Apple II 전용 웹 파일 매니저, 인터랙티브 3단 Hex 에디터 및 6502/65C02 디스어셈블러**입니다. 또한 AppleWin 에뮬레이터(또는 실기)와의 Super Serial Card (SSC) 통신 브릿지도 함께 제공합니다.
 
 ---
 
-## 1. 아키텍처 구성도 (Architecture)
+## 📸 주요 기능 (Key Features)
+
+### 1. 📁 Apple II DOS 3.3 디스크 파일 매니저
+* `apple2-web.dsk` 디스크 이미지를 실시간으로 분석하여 디스크 내의 모든 파일 목록을 조회합니다.
+* **파일 형식 지원**:
+  * `[A]` **Applesoft BASIC**: 텍스트 코드를 Apple II 내부 토큰 바이트 및 메모리 링크드 리스트 포인터(`$0801`)로 자동 컴파일/토큰화하여 디스크에 저장
+  * `[B]` **Binary**: 6502 기계어 실행 파일, 폰트, 메모리 덤프 바이너리 데이터 직접 조작
+  * `[I]` **Integer BASIC**: 정수 베이직 프로그램 조회 지원
+* **디스크 조작**: 신규 파일 추가, 기존 파일 수정, 파일 삭제, 디스크 이미지(`.dsk`) 원클릭 다운로드 지원
+
+### 2. 📊 인터랙티브 3단 Hex Editor
+* **3단 분리 레이아웃**:
+  * **Offset Column**: `$000000`, `$000010` 등 16바이트 단위 오프셋
+  * **Hex Data Column**: 16바이트 16진수 셀 (8바이트 간격 구분 분리)
+  * **Decoded Text Column**: 우측 대응 ASCII 문자 (비출력 제어문자는 `.` 표시)
+* **실시간 양방향 동기화**:
+  * Hex 셀을 클릭하고 키보드로 16진수(`0-9`, `A-F`)를 타이핑하면 상위/하위 니블이 즉시 반영되며, **우측 문자(ASCII)도 실시간으로 동시 변경**됩니다.
+  * 2자리 Hex 입력 완료 시 **자동으로 다음 바이트로 커서 이동**.
+  * **방향키(`←`, `→`, `↑`, `↓`)**로 바이트 간 자유로운 탐색 지원.
+* **디스크에 직접 저장**: 수정된 바이너리 데이터를 `apple2-web.dsk`의 지정 번지(`$0801` 등)에 바이너리 파일(`[B]`)로 즉시 기록.
+
+### 3. ⚙️ 고속 6502 / 65C02 CPU Disassembler
+* 별도의 무거운 에뮬레이터 C++ 코드에 의존하지 않는 독립형 고속 순수 자바스크립트 6502/65C02 역어셈블러 내장.
+* **4단 디스어셈블리 테이블**:
+  * **Address**: 기준 메모리 주소 (기본 `$0800`, 원하는 번지로 변경 가능)
+  * **Hex Bytes**: 명령어 기계어 바이트 (`20 58 FC`, `A9 41` 등)
+  * **Instruction**: 6502/65C02 니모닉 및 피연산자 (`JSR $FC58`, `LDA #$41`, `BNE $0820` 등)
+  * **Comments / ROM Symbols**: **Apple II 모니터 롬 심볼 자동 주석**
+    * 예: `$FC58` → `; HOME (화면 지우기 & 커서 좌상단)`
+    * 예: `$FDED` → `; COUT (Acc 문자를 화면에 출력)`
+    * 예: `$FD0C` → `; RDKEY (커서 깜빡이며 키 입력 대기)`
+    * 예: `$C000` / `$C030` → `; KBD (키보드 래치)` / `; SPKR (스피커 클릭)`
+    * 분기 명령어(`BNE`, `BEQ` 등)의 분기 대상 목표 주소 자동 계산
+* **Hex Editor와의 유기적 연동**:
+  * 디스어셈블리 목록의 특정 행을 클릭하면 **자동으로 Hex Editor 탭으로 전환되며 해당 바이트 오프셋으로 즉시 포커스 이동**.
+  * 상단 주소 검색창(`$FDED` 등)으로 특정 주소 즉시 탐색 지원.
+
+### 4. 🔌 Apple //e Super Serial Card (SSC) 브릿지
+* AppleWin의 SSC TCP 소켓(기본 포트 1977) 또는 실제 물리 시리얼 COM 포트와 연결.
+* Apple II 콘솔과 웹 브라우저 간의 실시간 양방향 채팅 및 HTTP REST API 통신 지원.
+
+---
+
+## 🏛️ 시스템 아키텍처 (Architecture)
 
 ```
-+--------------------------+                         +-----------------------------------+
-|      Apple II / AppleWin |                         |        Windows Node.js Server     |
-|                          |                         |                                   |
-|  +--------------------+  |                         |  +-----------------------------+  |
-|  |   WEBCLIENT.BAS    |  |                         |  |   Serial-to-TCP Bridge      |  |
-|  |  (Applesoft BASIC) |  |                         |  |   (bridge.js)               |  |
-|  +---------+----------+  |                         |  +--------------+--------------+  |
-|            |             |                         |                 |                 |
-|  +---------v----------+  |   TCP Socket (1977)     |                 |                 |
-|  | Super Serial Card  |  | <---------------------> |                 |                 |
-|  | Slot 2 (ACIA 6551) |  |   (or Real COM Port)    |                 |                 |
-|  +--------------------+  |                         |  +--------------v--------------+  |
-+--------------------------+                         |  | Express HTTP & WebSocket    |  |
-                                                     |  | Server (port 3000)          |  |
-                                                     |  +--------------+--------------+  |
-                                                     +-----------------|-----------------+
-                                                                       |
-                                                     +-----------------v-----------------+
-                                                     | Modern Web Browser Dashboard      |
-                                                     | (http://localhost:3000)           |
-                                                     | - Live Chat / Serial Monitor      |
-                                                     | - REST API Tester & Hardware Stats|
-                                                     +-----------------------------------+
++-----------------------------------+             +----------------------------------+
+|    Apple II / AppleWin Emulator   |             |       Node.js Backend Server     |
+|                                   |             |                                  |
+|   +---------------------------+   |             |   +--------------------------+   |
+|   | apple2-web.dsk            |   |             |   | Express Server (3000)    |   |
+|   | - HELLO (Boot Welcome)    |   |             |   | - REST API /api/files    |   |
+|   | - WEBCLIENT (Terminal)    |   |             |   | - Static Web Dashboard   |   |
+|   | - FPBASIC, INTBASIC...    |   |             |   +------------+-------------+   |
+|   +-------------+-------------+   |                          |                     |
+|                 |                 |             +------------v-------------+       |
+|   +-------------v-------------+   | Disk File   | Python AC-Tool &         |       |
+|   | DOS 3.3 Disk Engine       | <-+-------------+ AppleCommander Engine    |       |
+|   | (Real-time File Access)   |   |             | (Tokenize & Put/Export)  |       |
+|   +---------------------------+   |             +--------------------------+       |
++-----------------------------------+                                                |
+                                                                                     |
+                                                  +----------------------------------v---+
+                                                  | Modern Web Client (Browser)          |
+                                                  | (http://localhost:3000)              |
+                                                  | ------------------------------------ |
+                                                  | 📁 DOS 3.3 Catalog File List         |
+                                                  | 📝 Applesoft BASIC Code Editor       |
+                                                  | 📊 3-Column Interactive Hex Editor   |
+                                                  | ⚙️ 6502/65C02 Real-time Disassembler |
+                                                  +--------------------------------------+
 ```
 
-- **Apple II 클라이언트**: Super Serial Card(SSC)의 ACIA 6551 레지스터(`$C0A8..$C0AB`)를 직접 제어하여 논블로킹(Non-blocking)으로 키보드 입력과 시리얼 송수신을 동시에 처리합니다.
-- **Node.js 서버 & 브릿지**:
-  - **Serial-to-TCP 브릿지 (`bridge.js`)**: AppleWin 에뮬레이터의 SSC TCP 리스너(기본 포트 1977)에 자동 연결하며, 접속 끊김 시 자동 재연결(Auto-reconnect)을 지원합니다. 실제 하드웨어 COM 포트(`--serial COM1`) 연동도 지원합니다.
-  - **Express HTTP 서버 (`server.js`)**: 포트 3000에서 웹 대시보드와 REST API(`/api/status`, `/api/time`, `/api/quote`, `/api/weather`, `/api/send`)를 호스팅합니다.
-  - **WebSocket 서버**: 브라우저와 Apple II 간의 채팅 및 패킷 송수신을 실시간 스트리밍합니다.
-- **부팅 가능한 디스크 (`apple2-web.dsk`)**: DOS 3.3 기반으로 부팅 시 `HELLO` 프로그램이 자동으로 `WEBCLIENT.BAS`를 로드하여 즉시 사용할 수 있습니다.
-
 ---
 
-## 2. 주요 기능 (Features)
+## 🚀 빠른 시작 (Quick Start)
 
-1. **실시간 양방향 채팅 (Live Terminal & Chat)**:
-   - 웹 브라우저에서 텍스트를 입력하면 즉시 Apple II 화면에 표시됩니다.
-   - Apple II에서 타이핑한 텍스트가 웹 브라우저 대시보드에 실시간으로 출력됩니다.
-2. **Apple II에서 HTTP REST API 호출**:
-   - `GET /api/time`: 서버의 현재 시각 동기화
-   - `GET /api/quote`: 레트로 컴퓨터 명언 수신
-   - `GET /api/weather`: 날씨 정보 수신
-   - `GET /api/status`: 서버 가동 시간 및 브릿지 패킷 통계 조회
-   - 커스텀 HTTP 요청 지원 (`GET <경로> HTTP/1.0`)
-3. **AppleWin 완벽 호환**:
-   - AppleWin의 내장 SSC TCP 포트(1977)와 즉시 연동됩니다.
-4. **독립 실행형 통합 테스트 (`npm test`)**:
-   - AppleWin을 켜지 않고도 모의 Apple II SSC 소켓을 띄워 브릿지와 HTTP 서버 통신을 자동으로 100% 검증합니다.
+### 1. 사전 요구사항
+* **Node.js** (v18 이상 권장)
+* **Python 3.x**
+* **Java (JRE/JDK 8 이상)**: AppleCommander를 통한 DSK 조작용
+* **AppleWin** (Apple //e 에뮬레이터, 선택 사항)
 
----
-
-## 3. 설치 및 실행 방법 (Quick Start)
-
-### 3.1 사전 요구사항
-- **Node.js** (v16 이상 권장)
-- **AppleWin** (Apple II 에뮬레이터)
-- **Java** (DSK 이미지 빌드 시 AppleCommander 실행용, JRE/JDK 8 이상)
-
-### 3.2 의존성 설치
+### 2. 저장소 복제 및 의존성 설치
 ```bash
+git clone https://github.com/mildstorm/apple2-web.git
+cd apple2-web
 npm install
 ```
 
-### 3.3 통합 테스트 실행
-Node.js 브릿지와 HTTP 서버의 동작을 사전에 검증합니다:
-```bash
-npm test
-```
-
-### 3.4 서버 시작
+### 3. 서버 실행
 ```bash
 npm start
 ```
-실행 시 기본적으로 다음과 같이 시작됩니다:
-- **HTTP 웹 대시보드**: `http://localhost:3000`
-- **TCP 브릿지 대상**: `127.0.0.1:1977` (AppleWin 기본 포트)
-
-옵션 매개변수:
-```bash
-# 다른 HTTP 포트 또는 TCP 포트 지정
-node server.js --http-port 8080 --tcp-port 1977
-
-# 실제 물리/가상 시리얼 포트(COM3) 연결 모드
-node server.js --mode serial --serial COM3 --baud 9600
-
-# 외부 에뮬레이터나 클라이언트가 서버로 접속하도록 TCP 서버 모드로 실행
-node server.js --mode tcp-server --tcp-port 1978
-```
+서버가 기동되면 웹 브라우저에서 아래 주소로 접속합니다:
+👉 **http://localhost:3000**
 
 ---
 
-## 4. AppleWin 에뮬레이터 설정
+## 💻 사용 가이드 (How to Use)
 
-1. **AppleWin**을 실행합니다.
-2. 우측 메뉴의 **설정(Configuration / F2 또는 Alt+F4)** 아이콘을 클릭합니다.
-3. **Slots** 또는 **Serial** 설정으로 이동합니다:
-   - **Slot 2**: `Super Serial Card`로 선택
-   - **Serial Port Name**: `TCP` (기본값 포트 1977로 수신 대기)
-4. Drive 1에 `apple2-web.dsk` 디스크 이미지를 넣고 AppleWin을 재부팅(Reset / F2)합니다.
-5. 화면에 부팅 배너가 출력되고 `WEBCLIENT.BAS` 메인 메뉴가 자동으로 실행됩니다!
+### 1. Applesoft BASIC 파일 편집 (`[A]`)
+1. 좌측 파일 목록에서 `HELLO`, `WEBCLIENT` 등 `[A]` 태그 파일을 클릭합니다.
+2. 우측 텍스트 에디터에 BASIC 소스 코드가 나타납니다.
+3. 원하는 위치에 엔터를 누르고 줄 번호와 함께 코드를 추가합니다:
+   ```basic
+   10 TEXT : HOME
+   20 PRINT "HELLO WORLD FROM APPLE //e!"
+   25 PRINT "NEW LINE ADDED FROM WEB!"
+   30 END
+   ```
+4. **`[💾 디스크에 저장]`**을 클릭하면, 파이썬 토크나이저가 키워드 토큰화 및 메모리 주소 링크를 생성하여 `apple2-web.dsk`에 직접 저장합니다.
 
----
+### 2. 바이너리 파일 편집 & 6502 역어셈블러 (`[B]`)
+1. 좌측 파일 목록에서 `FPBASIC`, `INTBASIC`, `BOOT13` 등 `[B]` 태그 파일을 클릭합니다.
+2. **Hex Editor**:
+   * 마우스로 변경하고자 하는 바이트 셀을 클릭합니다.
+   * 키보드로 `0-9`, `A-F`를 타이핑하면 즉시 바이트와 우측 ASCII 문자가 변경됩니다.
+   * 방향키로 인접 바이트를 이동할 수 있습니다.
+3. **6502 Disassembly**:
+   * 우측 상단의 **`[ ⚙️ 6502 Disassembly ]`** 탭을 클릭합니다.
+   * 6502 기계어가 디스어셈블되어 명령어 및 Apple II ROM 심볼 주석(`COUT`, `HOME`, `RDKEY` 등)과 함께 나타납니다.
+   * 특정 명령어를 클릭하면 Hex Editor의 해당 바이트 위치로 즉시 점프합니다.
+   * 시작 번지(`$0800` 등)를 변경하면 주소 및 분기점 계산이 실시간 재계산됩니다.
+4. **`[💾 디스크에 저장]`**을 클릭하면 수정된 바이너리가 디스크에 즉시 반영됩니다.
 
-## 5. Apple II 클라이언트 메뉴 가이드
-
-`WEBCLIENT.BAS`가 시작되면 다음 메뉴가 표시됩니다:
-
-```text
-   APPLE //e WEB CLIENT & SERIAL BRIDGE
-   ------------------------------------
-    1. LIVE TERMINAL & CHAT
-    2. GET SERVER TIME   (/api/time)
-    3. GET RETRO QUOTE   (/api/quote)
-    4. GET WEATHER       (/api/weather)
-    5. GET SERVER STATUS (/api/status)
-    6. CUSTOM HTTP REQUEST
-    7. PING TEST
-    8. EXIT TO BASIC
-
-   SELECT OPTION (1-8):
-```
-
-- **1. LIVE TERMINAL & CHAT**: 웹 브라우저 대시보드와 실시간 양방향 채팅을 진행합니다. 종료하려면 `[ESC]` 키를 누릅니다.
-- **2. GET SERVER TIME**: 서버로 `GET /api/time HTTP/1.0`을 전송하고 수신된 응답을 화면에 표시합니다.
-- **3. GET RETRO QUOTE**: 레트로 명언을 수신합니다.
-- **4. GET WEATHER**: 날씨 정보를 수신합니다.
-- **5. GET SERVER STATUS**: 서버 및 브릿지의 가동 시간과 패킷 카운터를 확인합니다.
-- **6. CUSTOM HTTP REQUEST**: 사용자가 직접 경로를 입력하여 원하는 엔드포인트로 HTTP 요청을 보냅니다.
-- **7. PING TEST**: 브릿지와의 통신 지연시간 및 정상 연결 상태를 확인합니다.
+### 3. AppleWin 에뮬레이터에서 결과 확인
+1. AppleWin 에뮬레이터 드라이브 1에 `apple2-web.dsk`를 마운트합니다.
+2. AppleWin에서 **`F2`** (또는 `Ctrl + F2`)를 눌러 부팅합니다.
+3. 프롬프트(`]`)에서 **`CATALOG`**를 입력하면 웹에서 추가/수정한 파일들이 모두 나타납니다.
+4. `RUN 파일명` 또는 `BRUN 파일명`으로 에뮬레이터에서 즉시 실행해 볼 수 있습니다.
 
 ---
 
-## 6. REST API 명세
+## 📡 REST API 명세 (API Endpoints)
 
-| Method | Endpoint | 설명 | 반환 예시 |
-|--------|----------|------|-----------|
-| `GET` | `/api/status` | 서버 및 브릿지 연결 상태, 패킷 통계 | `{"status":"online","bridge":{"connected":true...}}` |
-| `GET` | `/api/time` | 현재 서버 시간 | `SERVER TIME: 2026. 10. 31. 오후 8:49:39` |
-| `GET` | `/api/quote` | 레트로 컴퓨팅 명언 | `"Never trust a computer you can't throw out a window."` |
-| `GET` | `/api/weather` | 날씨 정보 | `LOCATION: Cupertino, CA | TEMP: 21C / 70F...` |
-| `POST` | `/api/send` | 브라우저/외부에서 Apple II로 텍스트 전송 | `{"message": "Hello Apple II!"}` |
-| `GET` | `/api/history` | 최근 통신 로그 내역 조회 | `{"history": [...]}` |
-
----
-
-## 7. DSK 이미지 재빌드
-
-코드를 수정했거나 새로운 BASIC 코드를 디스크에 다시 패키징하려면:
-```bash
-npm run build:dsk
-# 또는
-python build_dsk.py
-```
-- `ac_tool.py`가 프로젝트 내 `tools/AppleCommander.jar` 또는 시스템 환경 설정을 자동으로 감지하여 `apple2-web.dsk`를 생성합니다.
-- 개인 환경 경로가 전혀 하드코딩되어 있지 않으므로 어떤 환경에서도 즉시 빌드됩니다.
+| 메소드 | 엔드포인트 | 설명 |
+| :--- | :--- | :--- |
+| `GET` | `/api/files` | `apple2-web.dsk` 디스크 내의 전체 파일 목록 조회 (JSON) |
+| `GET` | `/api/files/:filename` | 특정 BASIC 파일의 텍스트 소스 코드 추출 |
+| `GET` | `/api/files/:filename?type=B` | 특정 바이너리 파일의 Raw Hex 데이터 추출 |
+| `POST` | `/api/files` | BASIC 소스 토큰화 저장 또는 바이너리 Hex 저장 |
+| `DELETE` | `/api/files/:filename` | 디스크에서 특정 파일 삭제 |
+| `GET` | `/api/download/dsk` | 수정된 `apple2-web.dsk` 디스크 이미지 파일 다운로드 |
 
 ---
 
-## 8. 디렉토리 구조
+## 📂 프로젝트 구조 (Directory Structure)
 
 ```
-~/apple2-web/
-├── server.js              # Express 웹 서버 & WebSocket 실시간 통신 서버
-├── bridge.js              # Super Serial Card Serial-to-TCP/IP 브릿지 엔진
-├── test_runner.js         # 자동화된 통합 테스트 스크립트 (npm test)
-├── build_dsk.py           # Apple II DOS 3.3 부팅 디스크 생성 스크립트
-├── ac_tool.py             # 범용 AppleCommander 디스크 관리 유틸리티
-├── apple2-web.dsk         # 부팅 가능한 Apple II 디스크 이미지
-├── package.json           # Node.js 프로젝트 설정 및 의존성
-├── public/
-│   └── index.html         # 웹 대시보드 (반응형 레트로 터미널 & REST API 테스터)
+apple2-web/
 ├── apple2/
-│   ├── HELLO.BAS          # 부팅 시 자동 실행되는 Applesoft BASIC 코드
-│   ├── WEBCLIENT.BAS      # 대화형 Apple II 웹 클라이언트 Applesoft BASIC 코드
-│   └── webclient.s        # 6502 어셈블리 고속 터미널 클라이언트 소스
-└── tools/
-    ├── AppleCommander.jar # 디스크 조작용 AppleCommander JAR
-    └── dos33_template.dsk # DOS 3.3 표준 템플릿 디스크
+│   ├── HELLO.BAS          # DOS 3.3 기본 부팅 환영 프로그램 소스
+│   └── WEBCLIENT.BAS      # Apple II SSC 웹 클라이언트 & 브릿지 소스
+├── public/
+│   └── index.html         # 레트로 CRT 테마 웹 대시보드, Hex Editor & 6502 Disassembler
+├── tools/
+│   ├── AppleCommander.jar # AppleCommander DOS 3.3 디스크 처리 엔진
+│   └── dos33_template.dsk # 초기 DOS 3.3 기본 디스크 템플릿
+├── ac_tool.py             # AppleCommander CLI 래퍼 (json, get, put, put-basic, delete)
+├── build_dsk.py           # Applesoft BASIC 토크나이저 및 DSK 이미지 빌더
+├── bridge.js              # Apple II SSC <-> TCP/시리얼 브릿지 모듈
+├── server.js              # Express HTTP 서버 및 DOS 3.3 파일 관리 REST API
+├── apple2-web.dsk         # 부팅 가능한 실시간 Apple II DOS 3.3 디스크 이미지
+├── package.json           # Node.js 프로젝트 설정 및 의존성
+└── README.md              # 프로젝트 안내 문서
 ```
+
+---
+
+## 📄 라이선스 (License)
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
