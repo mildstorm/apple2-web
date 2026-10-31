@@ -456,6 +456,40 @@
       font-style: italic;
     }
 
+    /* 디스크 스냅샷 모달 */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 3000;
+      backdrop-filter: blur(2px);
+    }
+    .modal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--green);
+      box-shadow: 0 0 25px rgba(51, 255, 51, 0.25);
+      border-radius: 6px;
+      width: 640px;
+      max-width: 90vw;
+      overflow: hidden;
+    }
+    .modal-header {
+      background: #0b120b;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: bold;
+      color: var(--green);
+    }
+    .modal-body {
+      padding: 16px 20px;
+    }
+
     /* 알림 토스트 */
     .toast {
       position: fixed;
@@ -487,6 +521,7 @@
 
     <div class="header-actions">
       <button class="btn" onclick="startNewBasicFile()">+ 새 BASIC 파일</button>
+      <button class="btn btn-secondary" onclick="openSnapshotModal()">🛡️ 스냅샷 &amp; 복원</button>
       <a href="/api/download/dsk" class="btn btn-secondary">💾 DSK 다운로드</a>
       <button class="btn btn-secondary" onclick="loadFiles()">↻ 목록 새로고침</button>
     </div>
@@ -535,6 +570,11 @@
           <label style="font-size: 12px; color: var(--text-dim);">파일명:</label>
           <input type="text" id="target-filename" class="input-text" placeholder="예: MYPROGRAM" style="flex: 1; text-transform: uppercase;">
           <span id="editor-size-info" style="font-size: 12px; color: var(--text-dim);"></span>
+        </div>
+
+        <!-- 실기 안전 Linter 경고 박스 -->
+        <div id="linter-warning-box" style="display: none; background: #261e0b; border: 1px solid var(--amber); border-radius: 4px; padding: 10px 14px; font-size: 12px; color: #ffd700;">
+          ⚠️ <strong>실기 안전 알림:</strong> <span id="linter-warning-text"></span>
         </div>
 
         <!-- 1) BASIC 소스 에디터 (타입 [A]) -->
@@ -614,6 +654,41 @@
       </div>
     </div>
   </main>
+
+  <!-- 디스크 스냅샷 & 롤백 모달 -->
+  <div id="snapshot-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span>🛡️ 디스크 스냅샷 자동 백업 &amp; 롤백 복원</span>
+        <button class="btn btn-secondary" style="padding: 2px 8px;" onclick="closeSnapshotModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 12px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.5;">
+          파일 저장/삭제 시 직전 상태의 DSK 이미지가 자동으로 보존됩니다. 실기 또는 에뮬레이터에서 디스크가 깨지거나 잘못 수정된 경우 언제든지 직전 시점으로 안전하게 롤백할 수 있습니다.
+        </p>
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+          <button class="btn btn-secondary" style="font-size: 11px;" onclick="createManualSnapshot()">📸 지금 즉시 스냅샷 생성</button>
+        </div>
+        <div style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead>
+              <tr style="background: #0b120b; border-bottom: 1px solid var(--border);">
+                <th style="padding: 8px 10px; text-align: left;">스냅샷 파일명</th>
+                <th style="padding: 8px 10px; text-align: left;">백업 시각</th>
+                <th style="padding: 8px 10px; text-align: right;">작업</th>
+              </tr>
+            </thead>
+            <tbody id="snapshot-tbody">
+              <tr><td colspan="3" style="text-align: center; padding: 15px; color: var(--text-dim);">스냅샷 불러오는 중...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 10px 16px; display: flex; justify-content: flex-end; border-top: 1px solid var(--border); background: #0b120b;">
+        <button class="btn btn-secondary" onclick="closeSnapshotModal()">닫기</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 알림 토스트 -->
   <div class="toast" id="toast">알림</div>
@@ -1260,12 +1335,13 @@
       hexEditorWrapper.style.display = 'none';
       disasmEditorWrapper.style.display = 'none';
       basicEditor.style.display = 'block';
+      linterWarningBox.style.display = 'none';
       basicEditor.value = '10 TEXT : HOME\n20 PRINT "HELLO FROM APPLE //e!"\n30 PRINT "WEB FILE MANAGER"\n40 END';
       editorSizeInfo.textContent = '새 파일';
       targetFilename.focus();
     }
 
-    // 파일 저장 (BASIC vs BINARY 실시간 변환 저장)
+    // 파일 저장 (BASIC vs BINARY 실시간 변환 저장 & 디스크 락 & Linter)
     async function saveCurrentFile() {
       const filename = targetFilename.value.trim().toUpperCase();
       if (!filename) {
@@ -1274,10 +1350,18 @@
         return;
       }
 
-      if (currentFileType === 'B') {
-        // 바이너리 Hex 저장
-        const hexData = currentRawBytes.map(b => b.toString(16).padStart(2, '0')).join('');
-        try {
+      linterWarningBox.style.display = 'none';
+      const saveBtn = document.querySelector('.editor-footer button');
+      const origText = saveBtn ? saveBtn.textContent : '';
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '🔒 디스크 안전 동기화 중...';
+      }
+
+      try {
+        if (currentFileType === 'B') {
+          // 바이너리 Hex 저장
+          const hexData = currentRawBytes.map(b => b.toString(16).padStart(2, '0')).join('');
           const res = await fetch('/api/files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1287,18 +1371,14 @@
           if (d.success) {
             modifiedIndices.clear();
             renderHexPage();
-            showToast(`바이너리 파일 '${filename}' (${currentRawBytes.length} bytes) 디스크 저장 완료!`);
+            showToast(`💾 바이너리 '${filename}' (${currentRawBytes.length}B) 저장 완료! (스냅샷 백업 생성) Apple II에서 CATALOG 또는 F2를 누르세요.`);
             loadFiles();
           } else {
             alert('저장 실패: ' + d.error);
           }
-        } catch (e) {
-          alert('저장 통신 오류: ' + e.message);
-        }
-      } else {
-        // BASIC 텍스트 저장
-        const content = basicEditor.value;
-        try {
+        } else {
+          // BASIC 텍스트 저장
+          const content = basicEditor.value;
           const res = await fetch('/api/files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1306,30 +1386,119 @@
           });
           const d = await res.json();
           if (d.success) {
-            showToast(`BASIC 파일 '${filename}' 저장 완료!`);
+            if (d.warnings && d.warnings.length > 0) {
+              linterWarningBox.style.display = 'block';
+              linterWarningText.textContent = d.warnings.join(' ');
+              showToast('⚠️ [경고] OPEN 파일 미닫힘 감지! 안전 알림을 확인하세요.');
+            } else {
+              showToast(`💾 BASIC '${filename}' 저장 완료! (스냅샷 백업 생성) Apple II에서 CATALOG 또는 F2를 누르세요.`);
+            }
             loadFiles();
           } else {
             alert('저장 실패: ' + d.error);
           }
-        } catch (e) {
-          alert('저장 통신 오류: ' + e.message);
+        }
+      } catch (e) {
+        alert('저장 통신 오류: ' + e.message);
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = origText;
         }
       }
     }
 
     // 파일 삭제
     async function deleteFile(filename) {
-      if (!confirm(`'${filename}' 파일을 디스크에서 삭제하시겠습니까?`)) return;
+      if (!confirm(`'${filename}' 파일을 디스크에서 삭제하시겠습니까?\n(삭제 직전의 상태가 스냅샷으로 자동 백업됩니다.)`)) return;
       try {
         const res = await fetch(`/api/files/${encodeURIComponent(filename)}`, { method: 'DELETE' });
         const d = await res.json();
         if (d.success) {
-          showToast(`'${filename}' 삭제 완료`);
+          showToast(`🗑️ '${filename}' 삭제 완료 (스냅샷 백업 생성됨)`);
           if (targetFilename.value === filename) startNewBasicFile();
           loadFiles();
         }
       } catch (e) {
         alert('삭제 오류: ' + e.message);
+      }
+    }
+
+    // 디스크 스냅샷 백업 & 롤백 기능
+    const linterWarningBox = document.getElementById('linter-warning-box');
+    const linterWarningText = document.getElementById('linter-warning-text');
+    const snapshotModal = document.getElementById('snapshot-modal');
+    const snapshotTbody = document.getElementById('snapshot-tbody');
+
+    async function openSnapshotModal() {
+      snapshotModal.style.display = 'flex';
+      await loadSnapshots();
+    }
+
+    function closeSnapshotModal() {
+      snapshotModal.style.display = 'none';
+    }
+
+    async function loadSnapshots() {
+      try {
+        const res = await fetch('/api/backups');
+        const data = await res.json();
+        if (data.backups && data.backups.length > 0) {
+          snapshotTbody.innerHTML = '';
+          data.backups.forEach(b => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid #142214';
+            tr.innerHTML = `
+              <td style="padding: 7px 10px; color: #a3d9a3; font-family: monospace;">${escapeHtml(b.filename)}</td>
+              <td style="padding: 7px 10px; color: var(--text-dim);">${escapeHtml(b.mtime)}</td>
+              <td style="padding: 7px 10px; text-align: right;">
+                <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: var(--amber);" onclick="rollbackSnapshot('${escapeHtml(b.filename)}')">🔄 이 시점으로 복원</button>
+              </td>
+            `;
+            snapshotTbody.appendChild(tr);
+          });
+        } else {
+          snapshotTbody.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 15px; color: var(--text-dim);">저장된 스냅샷이 없습니다.</td></tr>';
+        }
+      } catch (e) {
+        snapshotTbody.innerHTML = `<tr><td colspan="3" style="color:var(--red); padding:10px;">오류: ${e.message}</td></tr>`;
+      }
+    }
+
+    async function createManualSnapshot() {
+      try {
+        const res = await fetch('/api/backups/create', { method: 'POST' });
+        const d = await res.json();
+        if (d.success) {
+          showToast('📸 새 디스크 스냅샷 백업 생성 완료');
+          loadSnapshots();
+        } else {
+          alert('스냅샷 생성 실패: ' + d.error);
+        }
+      } catch (e) {
+        alert('통신 오류: ' + e.message);
+      }
+    }
+
+    async function rollbackSnapshot(filename) {
+      if (!confirm(`'${filename}' 시점으로 디스크를 롤백하시겠습니까?\n(현재 디스크 상태도 자동 백업됩니다.)`)) return;
+      try {
+        const res = await fetch('/api/backups/rollback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename })
+        });
+        const d = await res.json();
+        if (d.success) {
+          showToast(d.message);
+          closeSnapshotModal();
+          loadFiles();
+          startNewBasicFile();
+        } else {
+          alert('복원 실패: ' + d.error);
+        }
+      } catch (e) {
+        alert('통신 오류: ' + e.message);
       }
     }
 
