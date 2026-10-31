@@ -367,6 +367,95 @@
       align-items: center;
     }
 
+    /* 바이너리 뷰 전환 탭 */
+    .tab-btn {
+      background: #090e09;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: bold;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+    .tab-btn:hover {
+      color: var(--text);
+      border-color: var(--green-dim);
+    }
+    .tab-btn.active {
+      background: #142814;
+      color: var(--green);
+      border-color: var(--green);
+      box-shadow: 0 0 6px var(--green-glow);
+    }
+
+    /* 6502 Disassembly Styles */
+    .disasm-editor-wrapper {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      gap: 10px;
+    }
+    .disasm-viewport {
+      background: #060906;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow-y: auto;
+      max-height: 520px;
+      padding: 10px 14px;
+    }
+    .disasm-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'Consolas', monospace;
+      font-size: 13px;
+    }
+    .disasm-table th {
+      color: var(--green-dim);
+      font-weight: normal;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    .disasm-table td {
+      padding: 4px 10px;
+      border-bottom: 1px solid #111e11;
+      vertical-align: middle;
+    }
+    .disasm-table tr:hover {
+      background: #122212;
+      cursor: pointer;
+    }
+    .col-disasm-addr {
+      color: var(--amber);
+      font-weight: bold;
+      width: 90px;
+    }
+    .col-disasm-bytes {
+      color: #9cdcfe;
+      width: 120px;
+      letter-spacing: 1px;
+    }
+    .col-disasm-inst {
+      width: 200px;
+      white-space: nowrap;
+    }
+    .disasm-mnemonic {
+      color: #55ff55;
+      font-weight: bold;
+      display: inline-block;
+      width: 52px;
+    }
+    .disasm-operand {
+      color: #ffd700;
+    }
+    .col-disasm-comment {
+      color: #6a9955;
+      font-style: italic;
+    }
+
     /* 알림 토스트 */
     .toast {
       position: fixed;
@@ -432,7 +521,13 @@
     <div class="card">
       <div class="card-header">
         <span id="editor-title">📝 파일 편집</span>
-        <span class="tag tag-a" id="editor-type-tag">[A] Applesoft BASIC</span>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <div id="bin-view-tabs" style="display: none; gap: 4px;">
+            <button class="tab-btn active" id="tab-hex" onclick="setBinViewMode('hex')">📊 Hex Editor</button>
+            <button class="tab-btn" id="tab-disasm" onclick="setBinViewMode('disasm')">⚙️ 6502 Disassembly</button>
+          </div>
+          <span class="tag tag-a" id="editor-type-tag">[A] Applesoft BASIC</span>
+        </div>
       </div>
 
       <div class="editor-body">
@@ -475,6 +570,40 @@
             </table>
           </div>
         </div>
+
+        <!-- 3) 6502 디스어셈블러 뷰어 (타입 [B] 탭) -->
+        <div id="disasm-editor-wrapper" class="disasm-editor-wrapper" style="display: none;">
+          <div class="hex-toolbar">
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <span style="color: var(--text-dim); font-size: 11px;">시작 번지:</span>
+              <input type="text" id="disasm-base-addr" class="input-text" value="$0800" style="width: 75px; padding: 2px 6px; font-size: 12px; text-transform: uppercase;" onchange="onDisasmBaseChange()">
+              <span style="color: var(--border);">|</span>
+              <span style="font-size: 11px;">총 명령어: <strong id="disasm-total-inst" style="color: var(--amber);">0</strong>개</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="text" id="disasm-goto-input" class="input-text" placeholder="예: $FDED 또는 0820" style="width: 130px; padding: 2px 6px; font-size: 11px; text-transform: uppercase;" onkeydown="if(event.key==='Enter') gotoDisasmAddr()">
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="gotoDisasmAddr()">이동</button>
+              <span style="color: var(--border);">|</span>
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="prevDisasmPage()">◀ 이전</button>
+              <span id="disasm-page-info" style="font-size: 11px;">1 / 1</span>
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="nextDisasmPage()">다음 ▶</button>
+            </div>
+          </div>
+
+          <div class="disasm-viewport" id="disasm-viewport">
+            <table class="disasm-table">
+              <thead>
+                <tr>
+                  <th class="col-disasm-addr">Address</th>
+                  <th class="col-disasm-bytes">Hex Bytes</th>
+                  <th class="col-disasm-inst">Instruction</th>
+                  <th class="col-disasm-comment">Comments / ROM Symbols</th>
+                </tr>
+              </thead>
+              <tbody id="disasm-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <div class="editor-footer">
@@ -513,6 +642,73 @@
     let selectedByteIndex = 0;
     let hexPageIndex = 0;
     const BYTES_PER_PAGE = 512; // 32 rows per page (빠른 렌더링)
+
+    // 6502 디스어셈블러 상태 & DOM
+    const binViewTabs = document.getElementById('bin-view-tabs');
+    const tabHex = document.getElementById('tab-hex');
+    const tabDisasm = document.getElementById('tab-disasm');
+    const disasmEditorWrapper = document.getElementById('disasm-editor-wrapper');
+    const disasmTbody = document.getElementById('disasm-tbody');
+    const disasmBaseAddrInput = document.getElementById('disasm-base-addr');
+    const disasmTotalInst = document.getElementById('disasm-total-inst');
+    const disasmPageInfo = document.getElementById('disasm-page-info');
+    const disasmGotoInput = document.getElementById('disasm-goto-input');
+
+    let currentBinView = 'hex'; // 'hex' or 'disasm'
+    let disasmBaseAddr = 0x0800;
+    let disasmInstructions = [];
+    let disasmPageIndex = 0;
+    const DISASM_PER_PAGE = 80;
+
+    const APPLE2_SYMBOLS = {
+      0xC000: 'KBD (키보드 입력 래치)',
+      0xC010: 'KBDSTRB (키보드 스트로브 클리어)',
+      0xC030: 'SPKR (스피커 토글 클릭)',
+      0xC050: 'TXTCLR (그래픽 모드 전환)',
+      0xC051: 'TXTSET (텍스트 모드 전환)',
+      0xC052: 'MIXCLR (전체 화면 그래픽)',
+      0xC053: 'MIXSET (혼합 그래픽 + 4행 텍스트)',
+      0xC054: 'TXTPAGE1 (비디오 1페이지)',
+      0xC055: 'TXTPAGE2 (비디오 2페이지)',
+      0xC056: 'LORES (저해상도 그래픽)',
+      0xC057: 'HIRES (고해상도 그래픽)',
+      0xF800: 'PLOT (저해상도 점 찍기)',
+      0xF819: 'HLIN (저해상도 수평선 긋기)',
+      0xF828: 'VLIN (저해상도 수직선 긋기)',
+      0xF836: 'GR (저해상도 그래픽 초기화)',
+      0xFB60: 'TEXT (40컬럼 텍스트 모드 복귀)',
+      0xFC58: 'HOME (화면 지우기 & 커서 좌상단)',
+      0xFD0C: 'RDKEY (커서 깜빡이며 키 입력 대기)',
+      0xFD1B: 'KEYIN (키보드 문자 1개 입력)',
+      0xFD8E: 'CROUT (줄바꿈 CR 출력)',
+      0xFDDA: 'PRHEX (Acc 값을 2자리 Hex로 출력)',
+      0xFDE3: 'PRHEXZ (하위 4비트를 1자리 Hex 출력)',
+      0xFDED: 'COUT (Acc 문자를 화면에 출력)',
+      0xF3E2: 'HGR (고해상도 1페이지 켜고 화면 지우기)',
+      0xF3D8: 'HGR2 (고해상도 2페이지 켜고 화면 지우기)',
+      0xFF3A: 'BELL (비프 경고음 재생)',
+      0xFF58: 'IORST (I/O 초기화)',
+      0xFF65: 'MON (Apple II 모니터 * 프롬프트 진입)'
+    };
+
+    const OPCODES_6502 = {
+      0x00: ["BRK", "IMP", 1], 0x01: ["ORA", "IZX", 2], 0x04: ["TSB", "ZP", 2], 0x05: ["ORA", "ZP", 2], 0x06: ["ASL", "ZP", 2], 0x08: ["PHP", "IMP", 1], 0x09: ["ORA", "IMM", 2], 0x0A: ["ASL", "ACC", 1], 0x0C: ["TSB", "ABS", 3], 0x0D: ["ORA", "ABS", 3], 0x0E: ["ASL", "ABS", 3],
+      0x10: ["BPL", "REL", 2], 0x11: ["ORA", "IZY", 2], 0x12: ["ORA", "INZ", 2], 0x14: ["TRB", "ZP", 2], 0x15: ["ORA", "ZPX", 2], 0x16: ["ASL", "ZPX", 2], 0x18: ["CLC", "IMP", 1], 0x19: ["ORA", "ABY", 3], 0x1A: ["INC", "ACC", 1], 0x1C: ["TRB", "ABS", 3], 0x1D: ["ORA", "ABX", 3], 0x1E: ["ASL", "ABX", 3],
+      0x20: ["JSR", "ABS", 3], 0x21: ["AND", "IZX", 2], 0x24: ["BIT", "ZP", 2], 0x25: ["AND", "ZP", 2], 0x26: ["ROL", "ZP", 2], 0x28: ["PLP", "IMP", 1], 0x29: ["AND", "IMM", 2], 0x2A: ["ROL", "ACC", 1], 0x2C: ["BIT", "ABS", 3], 0x2D: ["AND", "ABS", 3], 0x2E: ["ROL", "ABS", 3],
+      0x30: ["BMI", "REL", 2], 0x31: ["AND", "IZY", 2], 0x32: ["AND", "INZ", 2], 0x34: ["BIT", "ZPX", 2], 0x35: ["AND", "ZPX", 2], 0x36: ["ROL", "ZPX", 2], 0x38: ["SEC", "IMP", 1], 0x39: ["AND", "ABY", 3], 0x3A: ["DEC", "ACC", 1], 0x3C: ["BIT", "ABX", 3], 0x3D: ["AND", "ABX", 3], 0x3E: ["ROL", "ABX", 3],
+      0x40: ["RTI", "IMP", 1], 0x41: ["EOR", "IZX", 2], 0x45: ["EOR", "ZP", 2], 0x46: ["LSR", "ZP", 2], 0x48: ["PHA", "IMP", 1], 0x49: ["EOR", "IMM", 2], 0x4A: ["LSR", "ACC", 1], 0x4C: ["JMP", "ABS", 3], 0x4D: ["EOR", "ABS", 3], 0x4E: ["LSR", "ABS", 3],
+      0x50: ["BVC", "REL", 2], 0x51: ["EOR", "IZY", 2], 0x52: ["EOR", "INZ", 2], 0x55: ["EOR", "ZPX", 2], 0x56: ["LSR", "ZPX", 2], 0x58: ["CLI", "IMP", 1], 0x59: ["EOR", "ABY", 3], 0x5A: ["PHY", "IMP", 1], 0x5D: ["EOR", "ABX", 3], 0x5E: ["LSR", "ABX", 3],
+      0x60: ["RTS", "IMP", 1], 0x61: ["ADC", "IZX", 2], 0x64: ["STZ", "ZP", 2], 0x65: ["ADC", "ZP", 2], 0x66: ["ROR", "ZP", 2], 0x68: ["PLA", "IMP", 1], 0x69: ["ADC", "IMM", 2], 0x6A: ["ROR", "ACC", 1], 0x6C: ["JMP", "IND", 3], 0x6D: ["ADC", "ABS", 3], 0x6E: ["ROR", "ABS", 3],
+      0x70: ["BVS", "REL", 2], 0x71: ["ADC", "IZY", 2], 0x72: ["ADC", "INZ", 2], 0x74: ["STZ", "ZPX", 2], 0x75: ["ADC", "ZPX", 2], 0x76: ["ROR", "ZPX", 2], 0x78: ["SEI", "IMP", 1], 0x79: ["ADC", "ABY", 3], 0x7A: ["PLY", "IMP", 1], 0x7C: ["JMP", "IAX", 3], 0x7D: ["ADC", "ABX", 3], 0x7E: ["ROR", "ABX", 3],
+      0x80: ["BRA", "REL", 2], 0x81: ["STA", "IZX", 2], 0x84: ["STY", "ZP", 2], 0x85: ["STA", "ZP", 2], 0x86: ["STX", "ZP", 2], 0x88: ["DEY", "IMP", 1], 0x89: ["BIT", "IMM", 2], 0x8A: ["TXA", "IMP", 1], 0x8C: ["STY", "ABS", 3], 0x8D: ["STA", "ABS", 3], 0x8E: ["STX", "ABS", 3],
+      0x90: ["BCC", "REL", 2], 0x91: ["STA", "IZY", 2], 0x92: ["STA", "INZ", 2], 0x94: ["STY", "ZPX", 2], 0x95: ["STA", "ZPX", 2], 0x96: ["STX", "ZPY", 2], 0x98: ["TYA", "IMP", 1], 0x99: ["STA", "ABY", 3], 0x9A: ["TXS", "IMP", 1], 0x9C: ["STZ", "ABS", 3], 0x9D: ["STA", "ABX", 3], 0x9E: ["STZ", "ABX", 3],
+      0xA0: ["LDY", "IMM", 2], 0xA1: ["LDA", "IZX", 2], 0xA2: ["LDX", "IMM", 2], 0xA4: ["LDY", "ZP", 2], 0xA5: ["LDA", "ZP", 2], 0xA6: ["LDX", "ZP", 2], 0xA8: ["TAY", "IMP", 1], 0xA9: ["LDA", "IMM", 2], 0xAA: ["TAX", "IMP", 1], 0xAC: ["LDY", "ABS", 3], 0xAD: ["LDA", "ABS", 3], 0xAE: ["LDX", "ABS", 3],
+      0xB0: ["BCS", "REL", 2], 0xB1: ["LDA", "IZY", 2], 0xB2: ["LDA", "INZ", 2], 0xB4: ["LDY", "ZPX", 2], 0xB5: ["LDA", "ZPX", 2], 0xB6: ["LDX", "ZPY", 2], 0xB8: ["CLV", "IMP", 1], 0xB9: ["LDA", "ABY", 3], 0xBA: ["TSX", "IMP", 1], 0xBC: ["LDY", "ABX", 3], 0xBD: ["LDA", "ABX", 3], 0xBE: ["LDX", "ABY", 3],
+      0xC0: ["CPY", "IMM", 2], 0xC1: ["CMP", "IZX", 2], 0xC4: ["CPY", "ZP", 2], 0xC5: ["CMP", "ZP", 2], 0xC6: ["DEC", "ZP", 2], 0xC8: ["INY", "IMP", 1], 0xC9: ["CMP", "IMM", 2], 0xCA: ["DEX", "IMP", 1], 0xCC: ["CPY", "ABS", 3], 0xCD: ["CMP", "ABS", 3], 0xCE: ["DEC", "ABS", 3],
+      0xD0: ["BNE", "REL", 2], 0xD1: ["CMP", "IZY", 2], 0xD2: ["CMP", "INZ", 2], 0xD5: ["CMP", "ZPX", 2], 0xD6: ["DEC", "ZPX", 2], 0xD8: ["CLD", "IMP", 1], 0xD9: ["CMP", "ABY", 3], 0xDA: ["PHX", "IMP", 1], 0xDD: ["CMP", "ABX", 3], 0xDE: ["DEC", "ABX", 3],
+      0xE0: ["CPX", "IMM", 2], 0xE1: ["SBC", "IZX", 2], 0xE4: ["CPX", "ZP", 2], 0xE5: ["SBC", "ZP", 2], 0xE6: ["INC", "ZP", 2], 0xE8: ["INX", "IMP", 1], 0xE9: ["SBC", "IMM", 2], 0xEA: ["NOP", "IMP", 1], 0xEC: ["CPX", "ABS", 3], 0xED: ["SBC", "ABS", 3], 0xEE: ["INC", "ABS", 3],
+      0xF0: ["BEQ", "REL", 2], 0xF1: ["SBC", "IZY", 2], 0xF2: ["SBC", "INZ", 2], 0xF5: ["SBC", "ZPX", 2], 0xF6: ["INC", "ZPX", 2], 0xF8: ["SED", "IMP", 1], 0xF9: ["SBC", "ABY", 3], 0xFA: ["PLX", "IMP", 1], 0xFD: ["SBC", "ABX", 3], 0xFE: ["INC", "ABX", 3]
+    };
 
     function showToast(msg) {
       toast.textContent = msg;
@@ -563,12 +759,12 @@
       if (activeRow) activeRow.classList.add('active-file');
 
       if (currentFileType === 'B') {
-        // --- BINARY FILE -> HEX EDITOR ---
+        // --- BINARY FILE -> HEX & 6502 DISASSEMBLY ---
         editorTypeTag.className = 'tag tag-b';
         editorTypeTag.textContent = '[B] Binary File';
+        binViewTabs.style.display = 'flex';
         basicEditor.style.display = 'none';
-        hexEditorWrapper.style.display = 'flex';
-        saveHint.textContent = 'Hex 코드를 클릭하고 원하는 16진수(0-9, A-F)를 입력하면 즉시 수정됩니다.';
+        setBinViewMode('hex');
 
         try {
           const res = await fetch(`/api/files/${encodeURIComponent(filename)}?type=B`);
@@ -582,8 +778,10 @@
             modifiedIndices.clear();
             selectedByteIndex = 0;
             hexPageIndex = 0;
+            disasmPageIndex = 0;
             editorSizeInfo.textContent = `크기: ${currentRawBytes.length.toLocaleString()} 바이트`;
             renderHexPage();
+            updateDisassembly();
             showToast(`'${filename}' 바이너리 로드 완료 (${currentRawBytes.length} bytes)`);
           }
         } catch (e) {
@@ -593,7 +791,9 @@
         // --- BASIC / TEXT FILE -> TEXT EDITOR ---
         editorTypeTag.className = 'tag tag-a';
         editorTypeTag.textContent = '[A] Applesoft BASIC';
+        binViewTabs.style.display = 'none';
         hexEditorWrapper.style.display = 'none';
+        disasmEditorWrapper.style.display = 'none';
         basicEditor.style.display = 'block';
         saveHint.textContent = 'BASIC 코드를 수정한 뒤 [디스크에 저장]을 누르세요.';
 
@@ -824,6 +1024,231 @@
       }
     }
 
+    // =========================================================
+    // 6502 DISASSEMBLER LOGIC & RENDER
+    // =========================================================
+    function setBinViewMode(mode) {
+      currentBinView = mode;
+      if (mode === 'hex') {
+        tabHex.classList.add('active');
+        tabDisasm.classList.remove('active');
+        hexEditorWrapper.style.display = 'flex';
+        disasmEditorWrapper.style.display = 'none';
+        saveHint.textContent = 'Hex 코드를 클릭하고 원하는 16진수(0-9, A-F)를 입력하면 즉시 수정됩니다.';
+        renderHexPage();
+      } else {
+        tabHex.classList.remove('active');
+        tabDisasm.classList.add('active');
+        hexEditorWrapper.style.display = 'none';
+        disasmEditorWrapper.style.display = 'flex';
+        saveHint.textContent = '명령어 행을 클릭하면 Hex Editor의 해당 바이트 위치로 바로 이동합니다.';
+        updateDisassembly();
+      }
+    }
+
+    function onDisasmBaseChange() {
+      let val = disasmBaseAddrInput.value.trim().replace(/^\$/, '');
+      let parsed = parseInt(val, 16);
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 0xFFFF) {
+        disasmBaseAddr = parsed;
+        disasmBaseAddrInput.value = '$' + disasmBaseAddr.toString(16).padStart(4, '0').toUpperCase();
+        updateDisassembly();
+      } else {
+        alert('올바른 16진수 주소(0000~FFFF)를 입력하세요.');
+        disasmBaseAddrInput.value = '$' + disasmBaseAddr.toString(16).padStart(4, '0').toUpperCase();
+      }
+    }
+
+    function disassembleBuffer(bytes, baseAddr) {
+      const instructions = [];
+      let offset = 0;
+      const len = bytes.length;
+
+      while (offset < len) {
+        const addr = (baseAddr + offset) & 0xFFFF;
+        const op = bytes[offset];
+        const info = OPCODES_6502[op];
+
+        if (!info) {
+          instructions.push({
+            offset,
+            addr,
+            bytes: [op],
+            mnemonic: '.BYTE',
+            operand: '$' + op.toString(16).padStart(2, '0').toUpperCase(),
+            comment: ''
+          });
+          offset += 1;
+          continue;
+        }
+
+        const [mnemonic, mode, size] = info;
+        const instBytes = [];
+        for (let i = 0; i < size; i++) {
+          if (offset + i < len) {
+            instBytes.push(bytes[offset + i]);
+          } else {
+            instBytes.push(0);
+          }
+        }
+
+        const b1 = instBytes[1] !== undefined ? instBytes[1] : 0;
+        const b2 = instBytes[2] !== undefined ? instBytes[2] : 0;
+        let operand = '';
+        let comment = '';
+        let target = null;
+
+        switch (mode) {
+          case 'IMP': operand = ''; break;
+          case 'ACC': operand = 'A'; break;
+          case 'IMM': operand = '#$' + b1.toString(16).padStart(2, '0').toUpperCase(); break;
+          case 'ZP':
+            operand = '$' + b1.toString(16).padStart(2, '0').toUpperCase();
+            target = b1;
+            break;
+          case 'ZPX': operand = '$' + b1.toString(16).padStart(2, '0').toUpperCase() + ',X'; break;
+          case 'ZPY': operand = '$' + b1.toString(16).padStart(2, '0').toUpperCase() + ',Y'; break;
+          case 'ABS':
+            target = b1 | (b2 << 8);
+            operand = '$' + target.toString(16).padStart(4, '0').toUpperCase();
+            break;
+          case 'ABX':
+            target = b1 | (b2 << 8);
+            operand = '$' + target.toString(16).padStart(4, '0').toUpperCase() + ',X';
+            break;
+          case 'ABY':
+            target = b1 | (b2 << 8);
+            operand = '$' + target.toString(16).padStart(4, '0').toUpperCase() + ',Y';
+            break;
+          case 'IND':
+            target = b1 | (b2 << 8);
+            operand = '($' + target.toString(16).padStart(4, '0').toUpperCase() + ')';
+            break;
+          case 'IAX':
+            target = b1 | (b2 << 8);
+            operand = '($' + target.toString(16).padStart(4, '0').toUpperCase() + ',X)';
+            break;
+          case 'IZX': operand = '($' + b1.toString(16).padStart(2, '0').toUpperCase() + ',X)'; break;
+          case 'IZY': operand = '($' + b1.toString(16).padStart(2, '0').toUpperCase() + '),Y'; break;
+          case 'INZ': operand = '($' + b1.toString(16).padStart(2, '0').toUpperCase() + ')'; break;
+          case 'REL': {
+            const rel = (b1 >= 128) ? (b1 - 256) : b1;
+            target = (addr + 2 + rel) & 0xFFFF;
+            operand = '$' + target.toString(16).padStart(4, '0').toUpperCase();
+            comment = `분기 -> $${target.toString(16).padStart(4, '0').toUpperCase()}`;
+            break;
+          }
+        }
+
+        if (target !== null && APPLE2_SYMBOLS[target]) {
+          comment = (comment ? comment + ' | ' : '') + APPLE2_SYMBOLS[target];
+        }
+
+        instructions.push({
+          offset,
+          addr,
+          bytes: instBytes,
+          mnemonic,
+          operand,
+          comment
+        });
+
+        offset += size;
+      }
+
+      return instructions;
+    }
+
+    function updateDisassembly() {
+      disasmInstructions = disassembleBuffer(currentRawBytes, disasmBaseAddr);
+      disasmTotalInst.textContent = disasmInstructions.length.toLocaleString();
+      renderDisasmPage();
+    }
+
+    function renderDisasmPage() {
+      disasmTbody.innerHTML = '';
+      const totalInst = disasmInstructions.length;
+      const totalPages = Math.max(1, Math.ceil(totalInst / DISASM_PER_PAGE));
+      if (disasmPageIndex >= totalPages) disasmPageIndex = totalPages - 1;
+      if (disasmPageIndex < 0) disasmPageIndex = 0;
+
+      disasmPageInfo.textContent = `${disasmPageIndex + 1} / ${totalPages}`;
+
+      const startIdx = disasmPageIndex * DISASM_PER_PAGE;
+      const endIdx = Math.min(startIdx + DISASM_PER_PAGE, totalInst);
+
+      for (let i = startIdx; i < endIdx; i++) {
+        const item = disasmInstructions[i];
+        const tr = document.createElement('tr');
+        tr.onclick = () => jumpFromDisasmToHex(item.offset);
+        tr.title = `오프셋 $${item.offset.toString(16).toUpperCase().padStart(6, '0')} 클릭 시 Hex 에디터로 이동`;
+
+        const hexStr = item.bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+
+        tr.innerHTML = `
+          <td class="col-disasm-addr">$${item.addr.toString(16).padStart(4, '0').toUpperCase()}</td>
+          <td class="col-disasm-bytes">${hexStr}</td>
+          <td class="col-disasm-inst">
+            <span class="disasm-mnemonic">${item.mnemonic}</span>
+            <span class="disasm-operand">${escapeHtml(item.operand)}</span>
+          </td>
+          <td class="col-disasm-comment">${item.comment ? '; ' + escapeHtml(item.comment) : ''}</td>
+        `;
+        disasmTbody.appendChild(tr);
+      }
+    }
+
+    function prevDisasmPage() {
+      if (disasmPageIndex > 0) {
+        disasmPageIndex--;
+        renderDisasmPage();
+      }
+    }
+
+    function nextDisasmPage() {
+      const totalPages = Math.ceil(disasmInstructions.length / DISASM_PER_PAGE);
+      if (disasmPageIndex < totalPages - 1) {
+        disasmPageIndex++;
+        renderDisasmPage();
+      }
+    }
+
+    function gotoDisasmAddr() {
+      const val = disasmGotoInput.value.trim().replace(/^\$/, '');
+      if (!val) return;
+      const targetAddr = parseInt(val, 16);
+      if (isNaN(targetAddr)) {
+        alert('올바른 16진수 주소를 입력하세요 (예: 0820 또는 $FDED).');
+        return;
+      }
+
+      let foundIdx = -1;
+      for (let i = 0; i < disasmInstructions.length; i++) {
+        if (disasmInstructions[i].addr >= targetAddr) {
+          foundIdx = i;
+          break;
+        }
+      }
+
+      if (foundIdx === -1 && disasmInstructions.length > 0) {
+        foundIdx = disasmInstructions.length - 1;
+      }
+
+      if (foundIdx !== -1) {
+        disasmPageIndex = Math.floor(foundIdx / DISASM_PER_PAGE);
+        renderDisasmPage();
+        showToast(`주소 $${targetAddr.toString(16).padStart(4, '0').toUpperCase()} 이동 완료`);
+      }
+    }
+
+    function jumpFromDisasmToHex(byteOffset) {
+      setBinViewMode('hex');
+      hexPageIndex = Math.floor(byteOffset / BYTES_PER_PAGE);
+      renderHexPage();
+      selectByte(byteOffset);
+      showToast(`Hex 오프셋 $${byteOffset.toString(16).padStart(6, '0').toUpperCase()} 로 이동`);
+    }
+
     // 새 BASIC 파일 작성
     function startNewBasicFile() {
       currentFileType = 'A';
@@ -831,7 +1256,9 @@
       editorTitle.textContent = '📝 새 BASIC 파일 작성';
       editorTypeTag.className = 'tag tag-a';
       editorTypeTag.textContent = '[A] Applesoft BASIC';
+      binViewTabs.style.display = 'none';
       hexEditorWrapper.style.display = 'none';
+      disasmEditorWrapper.style.display = 'none';
       basicEditor.style.display = 'block';
       basicEditor.value = '10 TEXT : HOME\n20 PRINT "HELLO FROM APPLE //e!"\n30 PRINT "WEB FILE MANAGER"\n40 END';
       editorSizeInfo.textContent = '새 파일';
