@@ -1,270 +1,218 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Apple II SSC Web Bridge & Server</title>
+  <title>Apple II DOS 3.3 Disk File & Hex Manager</title>
   <style>
     :root {
-      --bg-color: #0c100c;
-      --card-bg: #141b14;
-      --border-color: #1f361f;
-      --accent-green: #33ff33;
-      --accent-green-dim: #22aa22;
-      --accent-green-glow: rgba(51, 255, 51, 0.25);
+      --bg: #090c09;
+      --card-bg: #101610;
+      --border: #1d331d;
+      --green: #33ff33;
+      --green-dim: #1f991f;
+      --green-glow: rgba(51, 255, 51, 0.2);
+      --text: #d2f0d2;
+      --text-dim: #608860;
       --amber: #ffb000;
-      --red: #ff4444;
-      --text-color: #e0f8e0;
-      --text-dim: #7da57d;
-      --font-mono: 'Consolas', 'Courier New', 'Fira Code', monospace;
+      --cyan: #55ffff;
+      --red: #ff5555;
+      --cell-hover: #1e3a1e;
+      --cell-active: #2b592b;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: var(--bg-color);
-      color: var(--text-color);
-      font-family: var(--font-mono);
-      font-size: 14px;
-      line-height: 1.5;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Consolas', 'Courier New', monospace;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
     }
 
-    /* Scanline effect */
-    body::before {
-      content: " ";
-      display: block;
-      position: fixed;
-      top: 0; left: 0; bottom: 0; right: 0;
-      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
-      background-size: 100% 4px;
-      z-index: 999;
-      pointer-events: none;
-      opacity: 0.6;
-    }
-
     header {
-      background-color: #080d08;
-      border-bottom: 2px solid var(--border-color);
-      padding: 12px 24px;
+      background: #060906;
+      border-bottom: 2px solid var(--border);
+      padding: 14px 28px;
       display: flex;
-      flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
-      gap: 16px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
     }
 
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .brand-logo {
-      width: 32px;
-      height: 32px;
-      background-color: var(--accent-green);
-      color: #000;
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .logo {
+      background: #142814;
+      border: 1px solid var(--green);
+      color: var(--green);
       font-weight: bold;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      padding: 6px 10px;
       border-radius: 4px;
-      font-size: 18px;
-      box-shadow: 0 0 10px var(--accent-green-glow);
+      box-shadow: 0 0 8px var(--green-glow);
     }
 
-    .brand-title {
-      font-size: 18px;
+    .title {
+      font-size: 19px;
       font-weight: bold;
-      color: var(--accent-green);
-      text-shadow: 0 0 8px var(--accent-green-glow);
+      color: var(--green);
+      letter-spacing: 0.5px;
     }
 
-    .brand-subtitle {
-      font-size: 11px;
+    .subtitle {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .header-actions { display: flex; gap: 10px; }
+
+    .btn {
+      background: #152415;
+      color: var(--green);
+      border: 1px solid var(--green-dim);
+      padding: 7px 14px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: var(--green);
+      color: #000;
+      box-shadow: 0 0 10px var(--green-glow);
+    }
+
+    .btn-secondary {
+      background: #101810;
+      border-color: var(--border);
       color: var(--text-dim);
     }
 
-    .status-badges {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
+    .btn-secondary:hover {
+      background: #182618;
+      color: var(--text);
+      border-color: var(--green-dim);
     }
 
-    .badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 12px;
-      background: #111a11;
-      border: 1px solid var(--border-color);
-      font-size: 12px;
+    .btn-danger {
+      border-color: #662222;
+      color: var(--red);
+      background: #201010;
     }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background-color: #888;
-    }
-
-    .status-dot.connected {
-      background-color: var(--accent-green);
-      box-shadow: 0 0 8px var(--accent-green);
-    }
-
-    .status-dot.disconnected {
-      background-color: var(--amber);
-      box-shadow: 0 0 8px var(--amber);
-      animation: pulse 1.5s infinite;
-    }
-
-    @keyframes pulse {
-      0% { opacity: 0.4; }
-      50% { opacity: 1; }
-      100% { opacity: 0.4; }
+    .btn-danger:hover {
+      background: var(--red);
+      color: #fff;
+      box-shadow: 0 0 10px rgba(255, 85, 85, 0.4);
     }
 
     main {
       flex: 1;
       padding: 20px 24px;
-      display: grid;
-      grid-template-columns: 2fr 1fr;
-      gap: 20px;
-      max-width: 1600px;
+      max-width: 1560px;
       margin: 0 auto;
       width: 100%;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 20px;
     }
 
-    @media (max-width: 1024px) {
-      main {
-        grid-template-columns: 1fr;
-      }
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; }
     }
 
     .card {
-      background-color: var(--card-bg);
-      border: 1px solid var(--border-color);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
       border-radius: 6px;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
 
     .card-header {
-      background-color: #0e160e;
-      border-bottom: 1px solid var(--border-color);
-      padding: 10px 16px;
+      background: #0b120b;
+      border-bottom: 1px solid var(--border);
+      padding: 12px 18px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      font-size: 14px;
       font-weight: bold;
-      color: var(--accent-green);
+      color: var(--green);
     }
 
-    .terminal-container {
-      display: flex;
-      flex-direction: column;
-      height: 600px;
-    }
-
-    .terminal-screen {
+    /* 좌측 파일 목록 */
+    .table-container {
       flex: 1;
-      padding: 14px;
       overflow-y: auto;
-      background-color: #070a07;
+      max-height: calc(100vh - 170px);
+      padding: 6px 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
       font-size: 13px;
-      line-height: 1.4;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      border-bottom: 1px solid var(--border-color);
     }
 
-    .log-entry {
-      word-break: break-all;
-    }
-
-    .log-time {
+    th {
+      background: #0b100b;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
       color: var(--text-dim);
       font-size: 11px;
-      margin-right: 8px;
     }
 
-    .log-tag {
+    td {
+      padding: 9px 10px;
+      border-bottom: 1px solid #142214;
+    }
+
+    tr:hover { background: #142014; cursor: pointer; }
+    tr.active-file { background: #182e18; }
+
+    .tag {
       display: inline-block;
-      padding: 1px 6px;
+      padding: 2px 6px;
       border-radius: 3px;
-      font-size: 10px;
+      font-size: 11px;
       font-weight: bold;
-      margin-right: 6px;
     }
 
-    .tag-rx { background: #164016; color: #55ff55; border: 1px solid #2e8b2e; }
-    .tag-tx { background: #3b3a10; color: #ffeb3b; border: 1px solid #857f12; }
-    .tag-sys { background: #1e2a3a; color: #64b5f6; border: 1px solid #1976d2; }
-    .tag-web { background: #3a1e3a; color: #ea80fc; border: 1px solid #8e24aa; }
+    .tag-a { background: #132813; color: #55ff55; border: 1px solid #2e8b2e; }
+    .tag-b { background: #132438; color: #64b5f6; border: 1px solid #1976d2; }
+    .tag-i { background: #383413; color: #ffeb3b; border: 1px solid #857f12; }
 
-    .terminal-controls {
-      padding: 12px 16px;
-      background-color: #0e160e;
+    /* 우측 에디터 컨테이너 */
+    .editor-body {
+      padding: 16px 20px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
+      flex: 1;
     }
 
-    .quick-actions {
+    .editor-meta {
       display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    .btn {
-      background-color: #172417;
-      color: var(--accent-green);
-      border: 1px solid var(--accent-green-dim);
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-family: inherit;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .btn:hover {
-      background-color: var(--accent-green);
-      color: #000;
-      box-shadow: 0 0 10px var(--accent-green-glow);
-    }
-
-    .btn-secondary {
-      border-color: var(--border-color);
-      color: var(--text-dim);
-    }
-
-    .btn-secondary:hover {
-      background-color: #2b3d2b;
-      color: var(--text-color);
-    }
-
-    .send-box {
-      display: flex;
-      gap: 8px;
+      gap: 12px;
+      align-items: center;
     }
 
     .input-text {
-      flex: 1;
-      background-color: #070a07;
-      border: 1px solid var(--border-color);
-      color: var(--text-color);
+      background: #060906;
+      border: 1px solid var(--border);
+      color: var(--text);
       padding: 8px 12px;
       border-radius: 4px;
       font-family: inherit;
@@ -273,407 +221,699 @@
     }
 
     .input-text:focus {
-      border-color: var(--accent-green);
-      box-shadow: 0 0 8px var(--accent-green-glow);
+      border-color: var(--green);
+      box-shadow: 0 0 8px var(--green-glow);
     }
 
-    .side-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    .stat-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 6px 0;
-      border-bottom: 1px dashed #1a2a1a;
+    textarea.input-text {
+      flex: 1;
+      min-height: 480px;
+      resize: vertical;
+      line-height: 1.5;
       font-size: 13px;
     }
 
-    .stat-label {
-      color: var(--text-dim);
-    }
-
-    .stat-value {
-      font-weight: bold;
-      color: var(--accent-green);
-    }
-
-    .api-card {
-      padding: 12px 16px;
+    /* ==================================================== */
+    /* INTERACTIVE HEX EDITOR STYLES                       */
+    /* ==================================================== */
+    .hex-editor-wrapper {
       display: flex;
       flex-direction: column;
+      flex: 1;
       gap: 10px;
     }
 
-    .api-endpoint {
+    .hex-toolbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #080d08;
-      padding: 6px 10px;
+      background: #090e09;
+      padding: 8px 14px;
+      border: 1px solid var(--border);
       border-radius: 4px;
-      border: 1px solid var(--border-color);
       font-size: 12px;
     }
 
-    .api-result {
-      background: #070a07;
-      border: 1px solid var(--border-color);
-      padding: 8px 12px;
+    .hex-viewport {
+      background: #060906;
+      border: 1px solid var(--border);
       border-radius: 4px;
-      font-size: 11px;
-      max-height: 120px;
       overflow-y: auto;
-      white-space: pre-wrap;
-      color: #9eff9e;
+      max-height: 520px;
+      padding: 10px 14px;
+      user-select: none;
     }
 
-    footer {
-      border-top: 1px solid var(--border-color);
-      padding: 12px 24px;
+    .hex-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'Consolas', monospace;
+      font-size: 13px;
+    }
+
+    .hex-table th {
+      color: var(--green-dim);
+      font-weight: normal;
+      padding: 6px 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hex-table td {
+      padding: 3px 2px;
+      border-bottom: none;
+      vertical-align: middle;
+    }
+
+    .col-offset {
+      color: var(--amber);
+      font-weight: bold;
+      width: 85px;
+      text-align: left;
+    }
+
+    .col-hex-group {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: 0 6px;
+    }
+
+    .hex-byte {
+      display: inline-block;
+      width: 22px;
       text-align: center;
-      color: var(--text-dim);
-      font-size: 12px;
+      color: #9cdcfe;
+      padding: 1px 0;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+
+    .hex-byte:hover {
+      background: var(--cell-hover);
+      color: #fff;
+    }
+
+    .hex-byte.active {
+      background: var(--cell-active);
+      color: #fff;
+      outline: 1px solid var(--green);
+    }
+
+    .hex-byte.modified {
+      color: var(--amber);
+      font-weight: bold;
+    }
+
+    .hex-sep {
+      display: inline-block;
+      width: 8px;
+    }
+
+    .col-ascii-group {
+      padding-left: 14px;
+      border-left: 1px solid var(--border);
+      letter-spacing: 1.5px;
+      white-space: pre;
+    }
+
+    .ascii-char {
+      display: inline-block;
+      width: 10px;
+      text-align: center;
+      color: #ce9178;
+    }
+
+    .ascii-char.non-printable {
+      color: #3f593f;
+    }
+
+    .ascii-char.active {
+      background: var(--cell-active);
+      color: #fff;
+      outline: 1px solid var(--green);
+    }
+
+    .ascii-char.modified {
+      color: var(--amber);
+      font-weight: bold;
+    }
+
+    .editor-footer {
+      background: #0b120b;
+      border-top: 1px solid var(--border);
+      padding: 12px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* 알림 토스트 */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #142814;
+      color: var(--green);
+      border: 1px solid var(--green);
+      padding: 12px 20px;
+      border-radius: 4px;
+      font-size: 13px;
+      box-shadow: 0 0 15px var(--green-glow);
+      display: none;
+      z-index: 2000;
     }
   </style>
 </head>
 <body>
 
-  <!-- Top Header Navigation -->
+  <!-- 헤더 -->
   <header>
     <div class="brand">
-      <div class="brand-logo">//e</div>
+      <div class="logo">//e</div>
       <div>
-        <div class="brand-title">Apple II Super Serial Bridge</div>
-        <div class="brand-subtitle">Node.js HTTP Server & Serial-to-TCP/IP Gateway</div>
+        <div class="title">Apple II DOS 3.3 Disk File &amp; Hex Manager</div>
+        <div class="subtitle">디스크 이미지: apple2-web.dsk &bull; BASIC 소스 &amp; 바이너리 실시간 편집기</div>
       </div>
     </div>
 
-    <div class="status-badges">
-      <div class="badge">
-        <span class="status-dot disconnected" id="bridge-status-dot"></span>
-        <span id="bridge-status-text">AppleWin SSC: Connecting...</span>
-      </div>
-      <div class="badge">
-        <span>Target:</span>
-        <strong id="bridge-target" style="color: var(--accent-green);">127.0.0.1:1977</strong>
-      </div>
-      <div class="badge">
-        <span>Web Clients:</span>
-        <strong id="web-clients-count" style="color: var(--accent-green);">1</strong>
-      </div>
-      <div class="badge">
-        <span>RX:</span>
-        <strong id="stat-bytes-rx">0 B</strong>
-        <span style="margin: 0 4px;">/</span>
-        <span>TX:</span>
-        <strong id="stat-bytes-tx">0 B</strong>
-      </div>
+    <div class="header-actions">
+      <button class="btn" onclick="startNewBasicFile()">+ 새 BASIC 파일</button>
+      <a href="/api/download/dsk" class="btn btn-secondary">💾 DSK 다운로드</a>
+      <button class="btn btn-secondary" onclick="loadFiles()">↻ 목록 새로고침</button>
     </div>
   </header>
 
-  <!-- Main Split Dashboard -->
+  <!-- 메인 2단 레이아웃 -->
   <main>
-    <!-- Left: Live Terminal & Message Stream -->
-    <div class="card terminal-container">
+    <!-- 좌측: 파일 목록 -->
+    <div class="card">
       <div class="card-header">
-        <span>&gt; LIVE SERIAL CONSOLE (Apple II &lt;--&gt; Web Server)</span>
-        <div>
-          <button class="btn btn-secondary" onclick="clearTerminal()">Clear</button>
-        </div>
+        <span>📁 파일 목록 (<span id="file-count">0</span>개)</span>
+        <span style="font-size: 11px; color: var(--text-dim);">클릭하여 편집</span>
       </div>
 
-      <div class="terminal-screen" id="terminal-screen">
-        <div class="log-entry">
-          <span class="log-time">[Init]</span>
-          <span class="log-tag tag-sys">SYS</span>
-          <span>Apple II Web Server Dashboard Loaded. Connecting to WebSocket...</span>
-        </div>
-      </div>
-
-      <div class="terminal-controls">
-        <div class="quick-actions">
-          <button class="btn" onclick="sendQuickCommand('TIME')">Send TIME</button>
-          <button class="btn" onclick="sendQuickCommand('QUOTE')">Send QUOTE</button>
-          <button class="btn" onclick="sendQuickCommand('WEATHER')">Send WEATHER</button>
-          <button class="btn" onclick="sendQuickCommand('STATUS')">Send STATUS</button>
-          <button class="btn" onclick="sendQuickCommand('PING')">Send PING</button>
-          <button class="btn" onclick="sendQuickCommand('HELP')">Send HELP</button>
-          <button class="btn btn-secondary" onclick="reconnectBridge()">Reconnect Bridge</button>
-        </div>
-
-        <div class="send-box">
-          <input type="text" id="msg-input" class="input-text" placeholder="Type a message to send directly to Apple II screen..." onkeydown="if(event.key==='Enter') sendMessage()">
-          <button class="btn" onclick="sendMessage()">Send to Apple II</button>
-        </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 50px;">형식</th>
+              <th>파일명</th>
+              <th style="width: 100px; text-align: right;">작업</th>
+            </tr>
+          </thead>
+          <tbody id="file-table">
+            <tr><td colspan="3" style="text-align: center; color: var(--text-dim); padding: 30px;">불러오는 중...</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <!-- Right: Stats & API Inspector -->
-    <div class="side-panel">
-      <!-- Bridge & Hardware Status Card -->
-      <div class="card">
-        <div class="card-header">
-          <span>HARDWARE & BRIDGE CONFIG</span>
+    <!-- 우측: 통합 에디터 (BASIC 텍스트 or 인터랙티브 HEX 에디터) -->
+    <div class="card">
+      <div class="card-header">
+        <span id="editor-title">📝 파일 편집</span>
+        <span class="tag tag-a" id="editor-type-tag">[A] Applesoft BASIC</span>
+      </div>
+
+      <div class="editor-body">
+        <div class="editor-meta">
+          <label style="font-size: 12px; color: var(--text-dim);">파일명:</label>
+          <input type="text" id="target-filename" class="input-text" placeholder="예: MYPROGRAM" style="flex: 1; text-transform: uppercase;">
+          <span id="editor-size-info" style="font-size: 12px; color: var(--text-dim);"></span>
         </div>
-        <div style="padding: 14px 16px;">
-          <div class="stat-row">
-            <span class="stat-label">Apple II Emulation:</span>
-            <span class="stat-value">AppleWin</span>
+
+        <!-- 1) BASIC 소스 에디터 (타입 [A]) -->
+        <textarea id="basic-editor" class="input-text" style="display: block;" placeholder="Applesoft BASIC 코드를 입력하세요..."></textarea>
+
+        <!-- 2) 인터랙티브 HEX 에디터 (타입 [B]) -->
+        <div id="hex-editor-wrapper" class="hex-editor-wrapper" style="display: none;">
+          <div class="hex-toolbar">
+            <div>
+              <span>오프셋: <strong id="hex-cursor-pos" style="color: var(--amber);">$000000</strong></span>
+              <span style="margin: 0 8px; color: var(--border);">|</span>
+              <span>선택 값: <strong id="hex-cursor-val" style="color: #9cdcfe;">--</strong></span>
+              <span style="margin: 0 8px; color: var(--border);">|</span>
+              <span>수정된 바이트: <strong id="hex-modified-count" style="color: var(--amber);">0</strong>개</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="prevHexPage()">◀ 이전</button>
+              <span id="hex-page-info">1 / 1</span>
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="nextHexPage()">다음 ▶</button>
+            </div>
           </div>
-          <div class="stat-row">
-            <span class="stat-label">Slot 2 Card:</span>
-            <span class="stat-value">Super Serial Card (SSC)</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Bridge Protocol:</span>
-            <span class="stat-value" id="card-bridge-mode">TCP Client (Port 1977)</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">HTTP Web Server:</span>
-            <span class="stat-value">Port 3000 (Active)</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Packets RX / TX:</span>
-            <span class="stat-value"><span id="stat-pkts-rx">0</span> / <span id="stat-pkts-tx">0</span></span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Server Uptime:</span>
-            <span class="stat-value" id="stat-uptime">0s</span>
+
+          <div class="hex-viewport" id="hex-viewport">
+            <table class="hex-table">
+              <thead>
+                <tr>
+                  <th class="col-offset">Offset</th>
+                  <th>00 01 02 03 04 05 06 07 &nbsp; 08 09 0A 0B 0C 0D 0E 0F</th>
+                  <th style="padding-left: 14px; text-align: left;">Decoded Text</th>
+                </tr>
+              </thead>
+              <tbody id="hex-tbody"></tbody>
+            </table>
           </div>
         </div>
       </div>
 
-      <!-- REST API Tester Card -->
-      <div class="card">
-        <div class="card-header">
-          <span>REST API TESTER</span>
-        </div>
-        <div class="api-card">
-          <div class="api-endpoint">
-            <code>GET /api/time</code>
-            <button class="btn" onclick="testApi('/api/time')">Test</button>
-          </div>
-          <div class="api-endpoint">
-            <code>GET /api/quote</code>
-            <button class="btn" onclick="testApi('/api/quote')">Test</button>
-          </div>
-          <div class="api-endpoint">
-            <code>GET /api/weather</code>
-            <button class="btn" onclick="testApi('/api/weather')">Test</button>
-          </div>
-          <div class="api-endpoint">
-            <code>GET /api/status</code>
-            <button class="btn" onclick="testApi('/api/status')">Test</button>
-          </div>
-
-          <div style="font-size: 11px; color: var(--text-dim); margin-top: 6px;">Last API Response:</div>
-          <pre class="api-result" id="api-result-box">// Click Test button above to inspect endpoint response</pre>
-        </div>
+      <div class="editor-footer">
+        <span style="font-size: 12px; color: var(--text-dim);" id="save-hint">
+          Hex 바이트를 클릭하고 키보드로 16진수(0-9, A-F)를 타이핑하면 즉시 수정됩니다.
+        </span>
+        <button class="btn" onclick="saveCurrentFile()">💾 디스크에 저장</button>
       </div>
     </div>
   </main>
 
-  <footer>
-    Apple II SSC to Node.js HTTP Web Server & Serial-to-TCP/IP Solution &copy; 2026
-  </footer>
+  <!-- 알림 토스트 -->
+  <div class="toast" id="toast">알림</div>
 
   <script>
-    let ws;
-    const terminalScreen = document.getElementById('terminal-screen');
-    const msgInput = document.getElementById('msg-input');
-    const bridgeDot = document.getElementById('bridge-status-dot');
-    const bridgeText = document.getElementById('bridge-status-text');
-    const bridgeTarget = document.getElementById('bridge-target');
-    const cardBridgeMode = document.getElementById('card-bridge-mode');
-    const clientsCount = document.getElementById('web-clients-count');
-    const statRx = document.getElementById('stat-bytes-rx');
-    const statTx = document.getElementById('stat-bytes-tx');
-    const statPktsRx = document.getElementById('stat-pkts-rx');
-    const statPktsTx = document.getElementById('stat-pkts-tx');
-    const statUptime = document.getElementById('stat-uptime');
-    const apiResultBox = document.getElementById('api-result-box');
+    const fileTable = document.getElementById('file-table');
+    const fileCount = document.getElementById('file-count');
+    const editorTitle = document.getElementById('editor-title');
+    const editorTypeTag = document.getElementById('editor-type-tag');
+    const targetFilename = document.getElementById('target-filename');
+    const editorSizeInfo = document.getElementById('editor-size-info');
+    const basicEditor = document.getElementById('basic-editor');
+    const hexEditorWrapper = document.getElementById('hex-editor-wrapper');
+    const hexTbody = document.getElementById('hex-tbody');
+    const hexCursorPos = document.getElementById('hex-cursor-pos');
+    const hexCursorVal = document.getElementById('hex-cursor-val');
+    const hexModifiedCount = document.getElementById('hex-modified-count');
+    const hexPageInfo = document.getElementById('hex-page-info');
+    const saveHint = document.getElementById('save-hint');
+    const toast = document.getElementById('toast');
 
-    function connectWs() {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}`;
-      ws = new WebSocket(wsUrl);
+    // 상태 관리
+    let currentFileType = 'A'; // 'A' or 'B'
+    let currentRawBytes = [];  // Array of integers 0-255
+    let modifiedIndices = new Set();
+    let selectedByteIndex = 0;
+    let hexPageIndex = 0;
+    const BYTES_PER_PAGE = 512; // 32 rows per page (빠른 렌더링)
 
-      ws.onopen = () => {
-        addLogEntry('SYS', 'status', 'WebSocket connected to Node.js server.');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          handleWsEvent(data);
-        } catch (e) {
-          console.error('WS parse error:', e);
-        }
-      };
-
-      ws.onclose = () => {
-        addLogEntry('SYS', 'status', 'WebSocket disconnected. Retrying in 2s...');
-        setTimeout(connectWs, 2000);
-      };
-
-      ws.onerror = (err) => {
-        console.warn('WS error:', err);
-      };
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 3000);
     }
 
-    function handleWsEvent(data) {
-      if (data.event === 'init') {
-        updateBridgeStatus(data.bridge);
-        if (data.history) {
-          data.history.forEach(item => {
-            addLogEntry(item.direction, item.type, item.message, item.timeStr);
+    // 파일 목록 조회
+    async function loadFiles() {
+      try {
+        const res = await fetch('/api/files');
+        const data = await res.json();
+        if (data.files && data.files.length > 0) {
+          fileCount.textContent = data.files.length;
+          fileTable.innerHTML = '';
+          data.files.forEach(f => {
+            const tr = document.createElement('tr');
+            tr.id = `row-${f.name}`;
+            
+            let tagClass = 'tag-a';
+            if (f.type === 'B') tagClass = 'tag-b';
+            else if (f.type === 'I') tagClass = 'tag-i';
+
+            tr.innerHTML = `
+              <td><span class="tag ${tagClass}">[${f.type}]</span></td>
+              <td style="font-weight: bold; color: #d6ffd6; font-size: 14px;" onclick="openFile('${escapeHtml(f.name)}', '${f.type}')">${escapeHtml(f.name)}</td>
+              <td style="text-align: right;">
+                <button class="btn btn-danger" style="padding: 2px 7px; font-size: 11px;" onclick="deleteFile('${escapeHtml(f.name)}')">삭제</button>
+              </td>
+            `;
+            fileTable.appendChild(tr);
           });
         }
-      } else if (data.event === 'bridge_status') {
-        updateBridgeStatus(data.status);
-      } else if (data.event === 'log') {
-        const item = data.item;
-        addLogEntry(item.direction, item.type, item.message, item.timeStr);
-      } else if (data.event === 'clients_count') {
-        clientsCount.textContent = data.count;
-      } else if (data.event === 'chat_message') {
-        addLogEntry(data.sender === 'Apple II' ? 'RX' : 'WEB', 'chat', `[${data.sender}]: ${data.text}`);
+      } catch (e) {
+        fileTable.innerHTML = `<tr><td colspan="3" style="color:var(--red);">오류: ${e.message}</td></tr>`;
       }
     }
 
-    function updateBridgeStatus(status) {
-      if (!status) return;
-      if (status.connected) {
-        bridgeDot.className = 'status-dot connected';
-        bridgeText.textContent = 'AppleWin SSC: Connected';
+    // 파일 열기 (BASIC vs BINARY 자동 분기)
+    async function openFile(filename, type) {
+      currentFileType = type || 'A';
+      targetFilename.value = filename;
+      editorTitle.textContent = `📝 파일 편집: ${filename}`;
+
+      // 활성 행 스타일 표시
+      document.querySelectorAll('#file-table tr').forEach(r => r.classList.remove('active-file'));
+      const activeRow = document.getElementById(`row-${filename}`);
+      if (activeRow) activeRow.classList.add('active-file');
+
+      if (currentFileType === 'B') {
+        // --- BINARY FILE -> HEX EDITOR ---
+        editorTypeTag.className = 'tag tag-b';
+        editorTypeTag.textContent = '[B] Binary File';
+        basicEditor.style.display = 'none';
+        hexEditorWrapper.style.display = 'flex';
+        saveHint.textContent = 'Hex 코드를 클릭하고 원하는 16진수(0-9, A-F)를 입력하면 즉시 수정됩니다.';
+
+        try {
+          const res = await fetch(`/api/files/${encodeURIComponent(filename)}?type=B`);
+          const data = await res.json();
+          if (data.hex) {
+            // Hex 문자열을 바이트 배열로 변환
+            currentRawBytes = [];
+            for (let i = 0; i < data.hex.length; i += 2) {
+              currentRawBytes.push(parseInt(data.hex.substr(i, 2), 16));
+            }
+            modifiedIndices.clear();
+            selectedByteIndex = 0;
+            hexPageIndex = 0;
+            editorSizeInfo.textContent = `크기: ${currentRawBytes.length.toLocaleString()} 바이트`;
+            renderHexPage();
+            showToast(`'${filename}' 바이너리 로드 완료 (${currentRawBytes.length} bytes)`);
+          }
+        } catch (e) {
+          alert('바이너리 로드 실패: ' + e.message);
+        }
       } else {
-        bridgeDot.className = 'status-dot disconnected';
-        bridgeText.textContent = 'AppleWin SSC: Waiting...';
-      }
+        // --- BASIC / TEXT FILE -> TEXT EDITOR ---
+        editorTypeTag.className = 'tag tag-a';
+        editorTypeTag.textContent = '[A] Applesoft BASIC';
+        hexEditorWrapper.style.display = 'none';
+        basicEditor.style.display = 'block';
+        saveHint.textContent = 'BASIC 코드를 수정한 뒤 [디스크에 저장]을 누르세요.';
 
-      if (status.target) {
-        bridgeTarget.textContent = status.target;
-      }
-      if (status.mode) {
-        cardBridgeMode.textContent = `${status.mode.toUpperCase()} (${status.target})`;
-      }
-
-      if (status.stats) {
-        statRx.textContent = formatBytes(status.stats.bytesRx);
-        statTx.textContent = formatBytes(status.stats.bytesTx);
-        statPktsRx.textContent = status.stats.packetsRx;
-        statPktsTx.textContent = status.stats.packetsTx;
-      }
-    }
-
-    function formatBytes(bytes) {
-      if (bytes < 1024) return bytes + ' B';
-      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-      return (bytes / 1048576).toFixed(2) + ' MB';
-    }
-
-    function addLogEntry(direction, type, message, timeStr) {
-      const time = timeStr || new Date().toLocaleTimeString();
-      const div = document.createElement('div');
-      div.className = 'log-entry';
-
-      let tagClass = 'tag-sys';
-      let tagText = direction || 'SYS';
-
-      if (direction === 'RX') tagClass = 'tag-rx';
-      else if (direction === 'TX') tagClass = 'tag-tx';
-      else if (direction === 'WEB') tagClass = 'tag-web';
-
-      div.innerHTML = `
-        <span class="log-time">[${time}]</span>
-        <span class="log-tag ${tagClass}">${tagText}</span>
-        <span>${escapeHtml(message)}</span>
-      `;
-
-      terminalScreen.appendChild(div);
-      terminalScreen.scrollTop = terminalScreen.scrollHeight;
-    }
-
-    function escapeHtml(str) {
-      if (!str) return '';
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-    }
-
-    function sendMessage() {
-      const text = msgInput.value.trim();
-      if (!text) return;
-
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'send', text }));
-      } else {
-        // Fallback to REST API
-        fetch('/api/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text })
-        });
-      }
-
-      msgInput.value = '';
-    }
-
-    function sendQuickCommand(cmd) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'raw_send', text: cmd }));
+        try {
+          const res = await fetch(`/api/files/${encodeURIComponent(filename)}`);
+          const data = await res.json();
+          basicEditor.value = data.content || '';
+          editorSizeInfo.textContent = `텍스트 모드`;
+          showToast(`'${filename}' BASIC 소스 로드 완료`);
+        } catch (e) {
+          basicEditor.value = '로드 오류: ' + e.message;
+        }
       }
     }
 
-    function reconnectBridge() {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'reconnect' }));
+    // =========================================================
+    // HEX EDITOR INTERACTIVE RENDER & KEYBOARD HANDLING
+    // =========================================================
+    function renderHexPage() {
+      hexTbody.innerHTML = '';
+      const totalBytes = currentRawBytes.length;
+      const totalPages = Math.max(1, Math.ceil(totalBytes / BYTES_PER_PAGE));
+      hexPageInfo.textContent = `${hexPageIndex + 1} / ${totalPages}`;
+      hexModifiedCount.textContent = modifiedIndices.size;
+
+      const startIdx = hexPageIndex * BYTES_PER_PAGE;
+      const endIdx = Math.min(startIdx + BYTES_PER_PAGE, totalBytes);
+
+      for (let offset = startIdx; offset < endIdx; offset += 16) {
+        const tr = document.createElement('tr');
+
+        // 1. Offset Column ($000000)
+        const tdOffset = document.createElement('td');
+        tdOffset.className = 'col-offset';
+        tdOffset.textContent = '$' + offset.toString(16).toUpperCase().padStart(6, '0');
+        tr.appendChild(tdOffset);
+
+        // 2. Hex Bytes Column (16 bytes)
+        const tdHex = document.createElement('td');
+        const hexGroup = document.createElement('div');
+        hexGroup.className = 'col-hex-group';
+
+        // 3. ASCII Column
+        const tdAscii = document.createElement('td');
+        tdAscii.className = 'col-ascii-group';
+
+        for (let i = 0; i < 16; i++) {
+          const byteIdx = offset + i;
+          if (i === 8) {
+            // 8바이트 구분 공간
+            const sep = document.createElement('span');
+            sep.className = 'hex-sep';
+            hexGroup.appendChild(sep);
+          }
+
+          if (byteIdx < totalBytes) {
+            const b = currentRawBytes[byteIdx];
+            const hexStr = b.toString(16).toUpperCase().padStart(2, '0');
+
+            // Hex 셀
+            const spanByte = document.createElement('span');
+            spanByte.className = 'hex-byte';
+            spanByte.id = `byte-${byteIdx}`;
+            spanByte.textContent = hexStr;
+            if (modifiedIndices.has(byteIdx)) spanByte.classList.add('modified');
+            if (byteIdx === selectedByteIndex) spanByte.classList.add('active');
+
+            // 클릭 포커스
+            spanByte.onclick = () => selectByte(byteIdx);
+
+            hexGroup.appendChild(spanByte);
+
+            // ASCII 셀
+            const spanChar = document.createElement('span');
+            spanChar.className = 'ascii-char';
+            spanChar.id = `ascii-${byteIdx}`;
+            const isPrintable = (b >= 32 && b <= 126);
+            spanChar.textContent = isPrintable ? String.fromCharCode(b) : '.';
+            if (!isPrintable) spanChar.classList.add('non-printable');
+            if (modifiedIndices.has(byteIdx)) spanChar.classList.add('modified');
+            if (byteIdx === selectedByteIndex) spanChar.classList.add('active');
+
+            spanChar.onclick = () => selectByte(byteIdx);
+
+            tdAscii.appendChild(spanChar);
+          }
+        }
+
+        tdHex.appendChild(hexGroup);
+        tr.appendChild(tdHex);
+        tr.appendChild(tdAscii);
+        hexTbody.appendChild(tr);
       }
+
+      updateCursorInfo();
     }
 
-    function clearTerminal() {
-      terminalScreen.innerHTML = '';
+    function selectByte(idx) {
+      if (idx < 0 || idx >= currentRawBytes.length) return;
+      selectedByteIndex = idx;
+
+      // 이전 활성 상태 해제
+      document.querySelectorAll('.hex-byte.active, .ascii-char.active').forEach(el => el.classList.remove('active'));
+
+      // 새 활성 셀 표시
+      const byteEl = document.getElementById(`byte-${idx}`);
+      const asciiEl = document.getElementById(`ascii-${idx}`);
+      if (byteEl) byteEl.classList.add('active');
+      if (asciiEl) asciiEl.classList.add('active');
+
+      updateCursorInfo();
     }
 
-    async function testApi(endpoint) {
-      apiResultBox.textContent = `Fetching ${endpoint}...`;
-      try {
-        const resp = await fetch(endpoint, {
-          headers: { 'Accept': 'application/json' }
-        });
-        const contentType = resp.headers.get('content-type') || '';
-        if (contentType.includes('json')) {
-          const json = await resp.json();
-          apiResultBox.textContent = JSON.stringify(json, null, 2);
+    function updateCursorInfo() {
+      if (currentRawBytes.length === 0) return;
+      hexCursorPos.textContent = '$' + selectedByteIndex.toString(16).toUpperCase().padStart(6, '0');
+      const val = currentRawBytes[selectedByteIndex];
+      const hexStr = val.toString(16).toUpperCase().padStart(2, '0');
+      const charStr = (val >= 32 && val <= 126) ? `'${String.fromCharCode(val)}'` : '(비출력)';
+      hexCursorVal.textContent = `${hexStr} (${charStr})`;
+    }
+
+    // 키보드로 실시간 HEX 편집 (0-9, A-F)
+    let hexNibbleInput = false;
+    let firstNibble = 0;
+
+    window.addEventListener('keydown', (e) => {
+      if (currentFileType !== 'B') return;
+      if (document.activeElement === targetFilename) return;
+
+      const key = e.key.toUpperCase();
+
+      // 방향키 이동
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        hexNibbleInput = false;
+        selectByteNext(1);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        hexNibbleInput = false;
+        selectByteNext(-1);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        hexNibbleInput = false;
+        selectByteNext(16);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        hexNibbleInput = false;
+        selectByteNext(-16);
+      }
+      // 16진수 입력 (0-9, A-F)
+      else if (/^[0-9A-F]$/.test(key)) {
+        e.preventDefault();
+        const nibbleVal = parseInt(key, 16);
+
+        if (!hexNibbleInput) {
+          // 상위 니블(첫 번째 자리) 입력
+          firstNibble = nibbleVal;
+          hexNibbleInput = true;
+          const byteEl = document.getElementById(`byte-${selectedByteIndex}`);
+          if (byteEl) byteEl.textContent = key + '_';
         } else {
-          const text = await resp.text();
-          apiResultBox.textContent = text;
+          // 하위 니블(두 번째 자리) 입력 완료 -> 바이트 확정!
+          const newByte = (firstNibble << 4) | nibbleVal;
+          hexNibbleInput = false;
+
+          // 실제 데이터 수정
+          currentRawBytes[selectedByteIndex] = newByte;
+          modifiedIndices.add(selectedByteIndex);
+
+          // UI 실시간 동기화 (Hex + ASCII)
+          updateByteDom(selectedByteIndex, newByte);
+
+          // 자동으로 다음 바이트로 이동!
+          selectByteNext(1);
+        }
+      }
+    });
+
+    function selectByteNext(step) {
+      const nextIdx = selectedByteIndex + step;
+      if (nextIdx >= 0 && nextIdx < currentRawBytes.length) {
+        // 페이지 범위 벗어나면 페이지 자동 이동
+        const targetPage = Math.floor(nextIdx / BYTES_PER_PAGE);
+        if (targetPage !== hexPageIndex) {
+          hexPageIndex = targetPage;
+          renderHexPage();
+        }
+        selectByte(nextIdx);
+      }
+    }
+
+    function updateByteDom(idx, val) {
+      const hexStr = val.toString(16).toUpperCase().padStart(2, '0');
+      const isPrintable = (val >= 32 && val <= 126);
+      const charStr = isPrintable ? String.fromCharCode(val) : '.';
+
+      const byteEl = document.getElementById(`byte-${idx}`);
+      const asciiEl = document.getElementById(`ascii-${idx}`);
+
+      if (byteEl) {
+        byteEl.textContent = hexStr;
+        byteEl.classList.add('modified');
+      }
+      if (asciiEl) {
+        asciiEl.textContent = charStr;
+        asciiEl.classList.add('modified');
+        if (!isPrintable) asciiEl.classList.add('non-printable');
+        else asciiEl.classList.remove('non-printable');
+      }
+
+      hexModifiedCount.textContent = modifiedIndices.size;
+      updateCursorInfo();
+    }
+
+    function prevHexPage() {
+      if (hexPageIndex > 0) {
+        hexPageIndex--;
+        renderHexPage();
+      }
+    }
+
+    function nextHexPage() {
+      const totalPages = Math.ceil(currentRawBytes.length / BYTES_PER_PAGE);
+      if (hexPageIndex < totalPages - 1) {
+        hexPageIndex++;
+        renderHexPage();
+      }
+    }
+
+    // 새 BASIC 파일 작성
+    function startNewBasicFile() {
+      currentFileType = 'A';
+      targetFilename.value = '';
+      editorTitle.textContent = '📝 새 BASIC 파일 작성';
+      editorTypeTag.className = 'tag tag-a';
+      editorTypeTag.textContent = '[A] Applesoft BASIC';
+      hexEditorWrapper.style.display = 'none';
+      basicEditor.style.display = 'block';
+      basicEditor.value = '10 TEXT : HOME\n20 PRINT "HELLO FROM APPLE //e!"\n30 PRINT "WEB FILE MANAGER"\n40 END';
+      editorSizeInfo.textContent = '새 파일';
+      targetFilename.focus();
+    }
+
+    // 파일 저장 (BASIC vs BINARY 실시간 변환 저장)
+    async function saveCurrentFile() {
+      const filename = targetFilename.value.trim().toUpperCase();
+      if (!filename) {
+        alert('파일명을 입력해주세요.');
+        targetFilename.focus();
+        return;
+      }
+
+      if (currentFileType === 'B') {
+        // 바이너리 Hex 저장
+        const hexData = currentRawBytes.map(b => b.toString(16).padStart(2, '0')).join('');
+        try {
+          const res = await fetch('/api/files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename, type: 'B', hex: hexData })
+          });
+          const d = await res.json();
+          if (d.success) {
+            modifiedIndices.clear();
+            renderHexPage();
+            showToast(`바이너리 파일 '${filename}' (${currentRawBytes.length} bytes) 디스크 저장 완료!`);
+            loadFiles();
+          } else {
+            alert('저장 실패: ' + d.error);
+          }
+        } catch (e) {
+          alert('저장 통신 오류: ' + e.message);
+        }
+      } else {
+        // BASIC 텍스트 저장
+        const content = basicEditor.value;
+        try {
+          const res = await fetch('/api/files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename, type: 'A', content })
+          });
+          const d = await res.json();
+          if (d.success) {
+            showToast(`BASIC 파일 '${filename}' 저장 완료!`);
+            loadFiles();
+          } else {
+            alert('저장 실패: ' + d.error);
+          }
+        } catch (e) {
+          alert('저장 통신 오류: ' + e.message);
+        }
+      }
+    }
+
+    // 파일 삭제
+    async function deleteFile(filename) {
+      if (!confirm(`'${filename}' 파일을 디스크에서 삭제하시겠습니까?`)) return;
+      try {
+        const res = await fetch(`/api/files/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        const d = await res.json();
+        if (d.success) {
+          showToast(`'${filename}' 삭제 완료`);
+          if (targetFilename.value === filename) startNewBasicFile();
+          loadFiles();
         }
       } catch (e) {
-        apiResultBox.textContent = `Error fetching ${endpoint}: ${e.message}`;
+        alert('삭제 오류: ' + e.message);
       }
     }
 
-    // Refresh uptime counter periodically
-    setInterval(async () => {
-      try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        if (data.uptime !== undefined) {
-          statUptime.textContent = data.uptime + 's';
-        }
-        if (data.bridge) {
-          updateBridgeStatus(data.bridge);
-        }
-      } catch (e) {}
-    }, 3000);
+    function escapeHtml(s) {
+      if (!s) return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
 
-    // Initial connection
-    connectWs();
+    // 초기 실행
+    loadFiles();
+    startNewBasicFile();
   </script>
 </body>
 </html>

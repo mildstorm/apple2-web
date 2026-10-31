@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import glob
 import re
+import json
 
 ENV_VAR_NAME = "APPLECOMMANDER_JAR"
 ENV_VAR_ALT = "AC_JAR"
@@ -134,12 +135,13 @@ def get_raw_file(dsk_path, file_name, out_path, custom_ac=None):
 
 def put_file(dsk_path, file_name, file_type, addr, local_data_or_file, custom_ac=None):
     """Puts a file into DSK (-p). Auto-deletes existing file first."""
+    import time
     delete_file(dsk_path, file_name, custom_ac=custom_ac)
 
     # If bytes/bytearray, write to a temp file
     temp_file = None
     if isinstance(local_data_or_file, (bytes, bytearray)):
-        temp_file = f"_temp_put_{os.getpid()}.bin"
+        temp_file = os.path.join(tempfile.gettempdir(), f"_temp_put_{os.getpid()}_{time.time_ns()}.bin")
         with open(temp_file, "wb") as f:
             f.write(local_data_or_file)
         in_file = temp_file
@@ -149,11 +151,17 @@ def put_file(dsk_path, file_name, file_type, addr, local_data_or_file, custom_ac
     try:
         addr_str = f"0x{addr:X}" if isinstance(addr, int) else str(addr)
         ac_jar = find_applecommander(custom_ac)
-        cmd = f'java -jar "{ac_jar}" -p {dsk_path} {file_name} {file_type} {addr_str} < {in_file}'
-        subprocess.run(cmd, shell=True, check=True)
+        with open(in_file, "rb") as stdin_f:
+            cmd = ["java", "-jar", ac_jar, "-p", dsk_path, file_name, file_type, addr_str]
+            res = subprocess.run(cmd, stdin=stdin_f, capture_output=True, text=True)
+            if res.returncode != 0:
+                raise RuntimeError(f"AppleCommander put 실패: {res.stderr}")
     finally:
         if temp_file and os.path.exists(temp_file):
-            os.remove(temp_file)
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
 
 def delete_file(dsk_path, file_name, custom_ac=None):
     """Deletes a file from DSK (-d)."""
@@ -200,7 +208,11 @@ if __name__ == '__main__':
         sys.exit(0)
 
     action = sys.argv[1].lower()
-    if action == "list" and len(sys.argv) >= 3:
+    if action == "json" and len(sys.argv) >= 3:
+        files = list_dsk_files(sys.argv[2])
+        out = [{"type": t, "name": n} for t, n in files]
+        print(json.dumps(out))
+    elif action == "list" and len(sys.argv) >= 3:
         files = list_dsk_files(sys.argv[2])
         print(f"[{sys.argv[2]}] 파일 목록:")
         for t, n in files:
@@ -214,5 +226,23 @@ if __name__ == '__main__':
     elif action == "delete" and len(sys.argv) >= 4:
         delete_file(sys.argv[2], sys.argv[3])
         print(f"[완료] {sys.argv[3]} 삭제 완료")
+    elif action == "put" and len(sys.argv) >= 7:
+        # python ac_tool.py put <dsk> <name> <type> <addr> <src_file>
+        dsk_path = sys.argv[2]
+        file_name = sys.argv[3]
+        file_type = sys.argv[4]
+        addr = sys.argv[5]
+        src_file = sys.argv[6]
+        put_file(dsk_path, file_name, file_type, addr, src_file)
+        print(f"[성공] {file_name} ({file_type}) 주입 완료")
+    elif action == "put-basic" and len(sys.argv) >= 5:
+        # python ac_tool.py put-basic <dsk> <name> <src_txt_file>
+        dsk_path = sys.argv[2]
+        file_name = sys.argv[3]
+        src_file = sys.argv[4]
+        from build_dsk import build_applesoft_program_from_file
+        prog_bytes = build_applesoft_program_from_file(src_file)
+        put_file(dsk_path, file_name, "A", 0x0801, prog_bytes)
+        print(f"[성공] BASIC {file_name} 토큰화 및 주입 완료")
     else:
         print(f"[오류] 잘못된 인자입니다: {sys.argv}")
