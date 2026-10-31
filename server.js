@@ -20,6 +20,34 @@ const DSK_PATH = path.join(__dirname, 'apple2-web.dsk');
 const BACKUP_DIR = path.join(__dirname, 'backups');
 const AC_TOOL = path.join(__dirname, 'ac_tool.py');
 
+// Cross-platform Python command detection (Windows: python/py, Linux/Mac: python3)
+function getPythonCommand() {
+  if (process.env.PYTHON) return process.env.PYTHON;
+  const tryCmd = (cmd) => {
+    try {
+      require('child_process').execSync(`${cmd} --version`, { stdio: 'ignore' });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+  if (process.platform !== 'win32' && tryCmd('python3')) return 'python3';
+  if (tryCmd('python')) return 'python';
+  if (tryCmd('python3')) return 'python3';
+  if (tryCmd('py')) return 'py';
+  return 'python';
+}
+const PYTHON_CMD = getPythonCommand();
+
+// Auto-initialize apple2-web.dsk from template on clean clone
+if (!fs.existsSync(DSK_PATH)) {
+  const templateDsk = path.join(__dirname, 'tools', 'dos33_template.dsk');
+  if (fs.existsSync(templateDsk)) {
+    fs.copyFileSync(templateDsk, DSK_PATH);
+    console.log('[Init] Auto-created apple2-web.dsk from tools/dos33_template.dsk');
+  }
+}
+
 if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
@@ -163,7 +191,7 @@ app.get('/api/files', (req, res) => {
     return res.status(404).json({ error: 'apple2-web.dsk 파일이 없습니다.' });
   }
 
-  exec(`python "${AC_TOOL}" json "${DSK_PATH}"`, (err, stdout, stderr) => {
+  exec(`"${PYTHON_CMD}" "${AC_TOOL}" json "${DSK_PATH}"`, (err, stdout, stderr) => {
     if (err) {
       return res.status(500).json({ error: stderr || err.message });
     }
@@ -183,7 +211,7 @@ app.get('/api/files/:filename', (req, res) => {
 
   if (fileType === 'B') {
     const tempBin = path.join(__dirname, `_temp_${Date.now()}.bin`);
-    exec(`python "${AC_TOOL}" get "${DSK_PATH}" "${filename}" "${tempBin}"`, (err, stdout, stderr) => {
+    exec(`"${PYTHON_CMD}" "${AC_TOOL}" get "${DSK_PATH}" "${filename}" "${tempBin}"`, (err, stdout, stderr) => {
       if (err || !fs.existsSync(tempBin)) {
         return res.status(500).json({ error: stderr || err?.message || '바이너리 추출 실패' });
       }
@@ -202,7 +230,7 @@ app.get('/api/files/:filename', (req, res) => {
       }
     });
   } else {
-    exec(`python "${AC_TOOL}" export "${DSK_PATH}" "${filename}"`, (err, stdout, stderr) => {
+    exec(`"${PYTHON_CMD}" "${AC_TOOL}" export "${DSK_PATH}" "${filename}"`, (err, stdout, stderr) => {
       if (err) {
         return res.status(500).json({ error: stderr || err.message });
       }
@@ -237,7 +265,7 @@ app.post('/api/files', (req, res) => {
         const buf = Buffer.from(hex, 'hex');
         fs.writeFileSync(tempFile, buf);
 
-        exec(`python "${AC_TOOL}" put "${DSK_PATH}" "${filename}" B 0x0801 "${tempFile}"`, (err, stdout, stderr) => {
+        exec(`"${PYTHON_CMD}" "${AC_TOOL}" put "${DSK_PATH}" "${filename}" B 0x0801 "${tempFile}"`, (err, stdout, stderr) => {
           try { fs.unlinkSync(tempFile); } catch (e) {}
           if (err) return reject(new Error(stderr || err.message));
           notifyAppleII(`SAVED FILE: ${filename} (BIN, ${buf.length}B)`);
@@ -254,7 +282,7 @@ app.post('/api/files', (req, res) => {
         const tempFile = path.join(__dirname, `_temp_${Date.now()}.bas`);
         fs.writeFileSync(tempFile, content, 'utf8');
 
-        exec(`python "${AC_TOOL}" put-basic "${DSK_PATH}" "${filename}" "${tempFile}"`, (err, stdout, stderr) => {
+        exec(`"${PYTHON_CMD}" "${AC_TOOL}" put-basic "${DSK_PATH}" "${filename}" "${tempFile}"`, (err, stdout, stderr) => {
           try { fs.unlinkSync(tempFile); } catch (e) {}
           if (err) return reject(new Error(stderr || err.message));
           notifyAppleII(`SAVED FILE: ${filename} (BASIC)`);
@@ -279,7 +307,7 @@ app.delete('/api/files/:filename', (req, res) => {
   withDiskLock(() => {
     return new Promise((resolve, reject) => {
       const backupInfo = createBackupSnapshot(`before_delete_${filename}`);
-      exec(`python "${AC_TOOL}" delete "${DSK_PATH}" "${filename}"`, (err, stdout, stderr) => {
+      exec(`"${PYTHON_CMD}" "${AC_TOOL}" delete "${DSK_PATH}" "${filename}"`, (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr || err.message));
         notifyAppleII(`DELETED FILE: ${filename}`);
         resolve({

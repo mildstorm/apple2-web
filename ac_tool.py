@@ -92,7 +92,7 @@ def find_applecommander(custom_path=None):
         "다음 세 가지 방법 중 하나로 환경 설정을 완료해 주세요:\n"
         "  1. [가장 권장] 프로젝트 내 'tools/' 폴더에 'AppleCommander.jar' 파일을 복사합니다.\n"
         "  2. [환경 변수] 시스템 환경 변수 'APPLECOMMANDER_JAR'에 JAR 파일의 전체 경로를 지정합니다.\n"
-        "     (예: set APPLECOMMANDER_JAR=C:\\tools\\AppleCommander.jar)\n"
+        "     (예: set APPLECOMMANDER_JAR=tools/AppleCommander.jar)\n"
         "  3. [옵션 지정] 스크립트 실행 시 '--ac-jar <파일경로>' 인자를 전달합니다.\n\n"
         "※ AppleCommander는 https://github.com/AppleCommander/AppleCommander/releases 에서 다운로드할 수 있습니다.\n"
     )

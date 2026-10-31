@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 *.tmp
 _temp_*
+backups/*.dsk
