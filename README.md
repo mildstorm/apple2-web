@@ -160,9 +160,39 @@ npm start
 | `GET` | `/api/files` | `apple2-web.dsk` 디스크 내의 전체 파일 목록 조회 (JSON) |
 | `GET` | `/api/files/:filename` | 특정 BASIC 파일의 텍스트 소스 코드 추출 |
 | `GET` | `/api/files/:filename?type=B` | 특정 바이너리 파일의 Raw Hex 데이터 추출 |
-| `POST` | `/api/files` | BASIC 소스 토큰화 저장 또는 바이너리 Hex 저장 |
-| `DELETE` | `/api/files/:filename` | 디스크에서 특정 파일 삭제 |
+| `POST` | `/api/files` | BASIC 소스 토큰화 저장 또는 바이너리 Hex 저장 (뮤텍스 & 자동 백업) |
+| `DELETE` | `/api/files/:filename` | 디스크에서 특정 파일 삭제 (자동 백업) |
+| `GET` | `/api/backups` | 디스크 스냅샷 백업 목록 조회 (최신 15개) |
+| `POST` | `/api/backups/rollback` | 특정 스냅샷 시점으로 디스크 안전 롤백(복원) |
+| `POST` | `/api/backups/create` | 수동 디스크 체크포인트 스냅샷 생성 |
 | `GET` | `/api/download/dsk` | 수정된 `apple2-web.dsk` 디스크 이미지 파일 다운로드 |
+
+---
+
+## 🔌 Apple II 실기 하드웨어 연결 가이드 (Real Hardware Setup)
+
+Apple II 실기의 **Super Serial Card (Slot 2)**와 PC를 통신 브릿지로 연결할 때는 다음 두 가지 방법 중 하나를 선택할 수 있습니다.
+
+### 방법 1. 유선 연결 (USB to RS-232 시리얼 + 널 모뎀 케이블)
+```
+[Apple II 실기 SSC (DB-25)] ──> [DB25/DB9 널 모뎀(Null Modem) 케이블] ──> [USB-RS232 컨버터(FTDI)] ──> [PC USB 포트]
+```
+1. **필요 부품**:
+   * FTDI 칩셋 기반 USB to RS-232 시리얼 변환 케이블
+   * DB9 to DB25 **널 모뎀(Null Modem / TX-RX 교차) 케이블** (또는 크로스 젠더)
+2. **SSC 카드 점퍼 설정**:
+   * SSC 카드 가운데 점퍼 블록의 화살표를 **`TERMINAL`** 방향으로 꽂고 널 모뎀 케이블을 연결합니다.
+3. **서버 실행 명령**:
+   ```bash
+   node server.js --mode serial --serial COM3 --baud 9600
+   ```
+
+### 방법 2. 무선 연결 (레트로 Wi-Fi 모뎀)
+```
+[Apple II 실기 SSC (DB-25)] ──> [RetroWiFiModem / WiModem232 (ESP8266)] ──> 📶 [가정용 Wi-Fi] ──> [PC Node.js 서버]
+```
+1. Apple II 뒷면 DB-25 포트에 **RetroWiFiModem** 또는 **WiModem232** 동글을 직접 꽂습니다.
+2. 모뎀 설정에서 홈 Wi-Fi에 연결한 후, PC의 Node.js `bridge.js`에서 모뎀의 IP와 포트로 TCP 소켓을 연결하면 케이블 없이 무선으로 실기와 PC가 실시간 연동됩니다.
 
 ---
 
@@ -170,6 +200,7 @@ npm start
 
 ```
 apple2-web/
+├── backups/               # 디스크 자동 스냅샷 백업 저장소 (롤백용 타임스탬프 .dsk)
 ├── apple2/
 │   ├── HELLO.BAS          # DOS 3.3 기본 부팅 환영 프로그램 소스
 │   └── WEBCLIENT.BAS      # Apple II SSC 웹 클라이언트 & 브릿지 소스
@@ -181,7 +212,7 @@ apple2-web/
 ├── ac_tool.py             # AppleCommander CLI 래퍼 (json, get, put, put-basic, delete)
 ├── build_dsk.py           # Applesoft BASIC 토크나이저 및 DSK 이미지 빌더
 ├── bridge.js              # Apple II SSC <-> TCP/시리얼 브릿지 모듈
-├── server.js              # Express HTTP 서버 및 DOS 3.3 파일 관리 REST API
+├── server.js              # Express HTTP 서버, DOS 3.3 파일 관리, 디스크 뮤텍스 & 롤백 API
 ├── apple2-web.dsk         # 부팅 가능한 실시간 Apple II DOS 3.3 디스크 이미지
 ├── package.json           # Node.js 프로젝트 설정 및 의존성
 └── README.md              # 프로젝트 안내 문서

@@ -1,14 +1,14 @@
 {
   "name": "apple2-web",
   "version": "1.0.0",
-  "description": "Apple II Super Serial Card (SSC) to Node.js HTTP Web Server & Serial-to-TCP/IP Bridge",
+  "description": "Apple II DOS 3.3 Web Disk File Manager, 3-Column Hex Editor & 6502 Disassembler",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "node test_runner.js",
     "build:dsk": "python build_dsk.py"
   },
-  "keywords": ["apple2", "applewin", "ssc", "serial", "tcp", "http", "web"],
+  "keywords": ["apple2", "dos3.3", "hex-editor", "disassembler", "6502", "applesoft", "applewin", "ssc"],
   "author": "mildstorm",
   "license": "MIT",
   "dependencies": {
