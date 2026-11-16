@@ -1,109 +1,150 @@
-# Apple II Web - DOS 3.3 Disk File Manager, Hex Editor & 6502 Disassembler
+# Apple II Web - DOS 3.3 디스크 관리 · 원격 키보드 · 메모리 진단
 
-[![Platform](https://img.shields.io/badge/Platform-Apple%20II%20%2F%20%2F%2Fe-brightgreen)](https://github.com/mildstorm/apple2-web)
+[![Platform](https://img.shields.io/badge/Platform-Apple%20II%2B%20%2F%20%2F%2Fe-brightgreen)](https://github.com/mildstorm/apple2-web)
 [![Node.js](https://img.shields.io/badge/Node.js-v18%2B-blue)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**apple2-web**은 모던 웹 브라우저(`http://localhost:3000`)에서 Apple II DOS 3.3 디스크 이미지(`.dsk`) 내의 파일들을 실시간으로 열람, 편집, 주입, 삭제할 수 있는 **Apple II 전용 웹 파일 매니저, 인터랙티브 3단 Hex 에디터 및 6502/65C02 디스어셈블러**입니다. 또한 AppleWin 에뮬레이터(또는 실기)와의 Super Serial Card (SSC) 통신 브릿지도 함께 제공합니다.
+**apple2-web**은 웹 브라우저(`http://localhost:3000`)에서 Apple II를 다루는 도구입니다. 두 가지 일을 합니다.
+
+1. **PC의 디스크 이미지 작업**: DOS 3.3 디스크 이미지(`.dsk`)의 파일을 보고, 고치고, 넣고, 지웁니다. Applesoft BASIC 편집기, 3단 Hex Editor, 6502/65C02 디스어셈블러가 들어 있습니다.
+2. **Super Serial Card(SSC)로 Apple II 원격 제어**: 실기(키보드가 고장 난 기계 포함)나 STM32 Apple //e 에뮬레이터를 SSC로 연결해 다음을 합니다.
+   * 웹에서 명령을 **타이핑**합니다.
+   * 드라이브의 **디스켓 내용을 읽어** 봅니다.
+   * **메모리/ROM을 덤프**해 PC 파일로 받습니다.
+   * **RAM·ROM 상태를 진단**합니다.
+
+---
+
+## 🧭 한눈에 보기 (What it does)
+
+| 분류 | 기능 | 대상 |
+| :--- | :--- | :--- |
+| 📁 디스크 이미지 | DOS 3.3 카탈로그, 파일 추가·수정·삭제, `.dsk` 다운로드 | PC의 `apple2-web.dsk` |
+| 📝 편집 | Applesoft BASIC 텍스트 ↔ 토큰 자동 변환, `OPEN`/`CLOSE` 누락 검사 | 로컬 디스크 |
+| 📊 분석 | 3단 Hex Editor, 6502/65C02 디스어셈블러(ROM 심볼 주석, 분기 계산) | 파일·디스크·메모리 덤프 |
+| 🛡️ 안전 | 저장 전 자동 스냅샷(15개) + 원클릭 롤백, 디스크 작업 순차 처리 | 로컬 디스크 |
+| ⌨️ 원격 키보드 | 웹 입력을 SSC로 Apple에 타이핑 (`CATALOG`, `RUN`, BASIC 줄, `SAVE` …), Ctrl-C/RETURN/ESC, 여러 줄 붙여넣기 | 실기 / STM32 / AppleWin |
+| 📡 디스켓 보기 | Apple 드라이브 1을 SSC로 읽어 파일 목록·BASIC·Hex·디스어셈블리로 보기 (DOS 없이 니블 단위로 읽음) | 실기 / STM32 |
+| 🧪 메모리 덤프 | 주소 범위의 RAM·ROM·Language Card·//e 내부 ROM을 `.bin` 파일로 | 실기 / STM32 |
+| 🩺 진단 | 기종 판별, 주 메모리·LC RAM 검사(내용 보존), ROM CRC32(칩 단위) | 실기 / STM32 |
+| 💽 디스켓 갱신 | 디스켓의 A2SRV를 최신으로 (실기 자신의 DOS로 `BSAVE`, 디스켓 기록 장치 불필요) | 실기 / STM32 |
+| 🔒 보안 | 기본 127.0.0.1 전용, DNS rebinding·CSRF 차단 | 서버 |
 
 ---
 
 ## 📸 주요 기능 (Key Features)
 
-### 1. 📁 Apple II DOS 3.3 디스크 파일 매니저
-* `apple2-web.dsk` 디스크 이미지를 실시간으로 분석하여 디스크 내의 모든 파일 목록을 조회합니다.
-* **파일 형식 지원**:
-  * `[A]` **Applesoft BASIC**: 텍스트 코드를 Apple II 내부 토큰 바이트 및 메모리 링크드 리스트 포인터(`$0801`)로 자동 컴파일/토큰화하여 디스크에 저장
-  * `[B]` **Binary**: 6502 기계어 실행 파일, 폰트, 메모리 덤프 바이너리 데이터 직접 조작
-  * `[I]` **Integer BASIC**: 정수 베이직 프로그램 조회 지원
-* **디스크 조작**: 신규 파일 추가, 기존 파일 수정, 파일 삭제, 디스크 이미지(`.dsk`) 원클릭 다운로드 지원
+### A. PC의 디스크 이미지 작업
 
-### 2. 📊 인터랙티브 3단 Hex Editor
-* **3단 분리 레이아웃**:
-  * **Offset Column**: `$000000`, `$000010` 등 16바이트 단위 오프셋
-  * **Hex Data Column**: 16바이트 16진수 셀 (8바이트 간격 구분 분리)
-  * **Decoded Text Column**: 우측 대응 ASCII 문자 (비출력 제어문자는 `.` 표시)
-* **실시간 양방향 동기화**:
-  * Hex 셀을 클릭하고 키보드로 16진수(`0-9`, `A-F`)를 타이핑하면 상위/하위 니블이 즉시 반영되며, **우측 문자(ASCII)도 실시간으로 동시 변경**됩니다.
-  * 2자리 Hex 입력 완료 시 **자동으로 다음 바이트로 커서 이동**.
-  * **방향키(`←`, `→`, `↑`, `↓`)**로 바이트 간 자유로운 탐색 지원.
-* **디스크에 직접 저장**: 수정된 바이너리 데이터를 `apple2-web.dsk`의 지정 번지(`$0801` 등)에 바이너리 파일(`[B]`)로 즉시 기록.
+#### 1. 📁 Apple II DOS 3.3 디스크 파일 매니저
+* `apple2-web.dsk` 디스크 이미지를 분석해 파일 목록을 보여 줍니다. 공백·제어문자가 들어간 DOS 이름(`GUN SOUND.OBJ`, `I^ANIT` 등)도 그대로 다룹니다.
+* **파일 형식**:
+  * `[A]` **Applesoft BASIC**: 텍스트 소스를 Apple II 토큰과 줄 연결 포인터(`$0801`)로 변환해 저장
+  * `[B]` **Binary**: 6502 기계어, 폰트, 메모리 덤프 등 바이너리를 직접 편집
+  * `[I]` **Integer BASIC**: 조회
+* **디스크 조작**: 새 파일 추가, 수정, 삭제, `.dsk` 원클릭 다운로드
 
-### 3. ⚙️ 고속 6502 / 65C02 CPU Disassembler
-* 별도의 무거운 에뮬레이터 C++ 코드에 의존하지 않는 독립형 고속 순수 자바스크립트 6502/65C02 역어셈블러 내장.
-* **4단 디스어셈블리 테이블**:
-  * **Address**: 기준 메모리 주소 (기본 `$0800`, 원하는 번지로 변경 가능)
-  * **Hex Bytes**: 명령어 기계어 바이트 (`20 58 FC`, `A9 41` 등)
-  * **Instruction**: 6502/65C02 니모닉 및 피연산자 (`JSR $FC58`, `LDA #$41`, `BNE $0820` 등)
-  * **Comments / ROM Symbols**: **Apple II 모니터 롬 심볼 자동 주석**
-    * 예: `$FC58` → `; HOME (화면 지우기 & 커서 좌상단)`
-    * 예: `$FDED` → `; COUT (Acc 문자를 화면에 출력)`
-    * 예: `$FD0C` → `; RDKEY (커서 깜빡이며 키 입력 대기)`
-    * 예: `$C000` / `$C030` → `; KBD (키보드 래치)` / `; SPKR (스피커 클릭)`
-    * 분기 명령어(`BNE`, `BEQ` 등)의 분기 대상 목표 주소 자동 계산
-* **Hex Editor와의 유기적 연동**:
-  * 디스어셈블리 목록의 특정 행을 클릭하면 **자동으로 Hex Editor 탭으로 전환되며 해당 바이트 오프셋으로 즉시 포커스 이동**.
-  * 상단 주소 검색창(`$FDED` 등)으로 특정 주소 즉시 탐색 지원.
+#### 2. 📊 인터랙티브 3단 Hex Editor
+* **Offset / Hex / ASCII** 3단 배치(16바이트씩, 8바이트마다 구분).
+* Hex 셀을 클릭하고 `0-9`, `A-F` 를 치면 바로 바뀌고 ASCII도 같이 바뀝니다. 두 자리를 치면 다음 바이트로, 방향키로 이동합니다.
+* 수정한 바이너리를 디스크에 `[B]` 파일로 저장합니다.
 
-### 4. 🛡️ 실기 및 에뮬레이터 데이터 손상 방지 안전 장치 (Safety & Reliability)
-* **자동 스냅샷 백업 & 원클릭 롤백**:
-  * 파일 저장/수정/삭제 시 직전 디스크 상태를 `backups/` 폴더에 타임스탬프 스냅샷으로 자동 보존합니다 (최신 15개 보관).
-  * 웹 UI의 **`[🛡️ 스냅샷 & 복원]`** 메뉴에서 언제든지 원하는 과거 시점으로 원클릭 롤백할 수 있습니다.
-* **디스크 뮤텍스 동시성 락 (Concurrency Mutex)**:
-  * 웹 요청이 동시에 들어와 디스크 VTOC(섹터 할당 테이블)가 꼬이는 문제를 방지하기 위해 순차 대기 큐(Queue) 처리.
-* **Applesoft BASIC 파일 I/O 안전 검사 (CLOSE 누락 방지)**:
-  * BASIC 소스 내 `OPEN` 명령 사용 시 `CLOSE`가 누락되었는지 자동 검사하여, 실기에서 파일 미닫힘으로 인한 디스크 오염을 방지하도록 경고 표시.
-* **실시간 Apple II 갱신 알림 브로드캐스트**:
-  * SSC 브릿지를 통해 디스크 갱신 시 Apple II 콘솔에 알림을 전송하여 즉각적인 `CATALOG` 또는 리셋을 유도.
+#### 3. ⚙️ 6502 / 65C02 Disassembler
+* 순수 JavaScript로 된 6502/65C02 역어셈블러입니다.
+* **Address / Hex Bytes / Instruction / Comments** 4단 표시. 기준 주소를 바꿀 수 있습니다(기본 `$0800`, 메모리 덤프는 덤프 시작 주소).
+* **Apple II ROM 심볼 자동 주석**: `$FC58` HOME, `$FDED` COUT, `$FD0C` RDKEY, `$C000` KBD, `$C030` SPKR 등. 분기 명령의 목표 주소도 계산해 줍니다.
+* 줄을 누르면 Hex Editor의 해당 바이트로 이동하고, 주소 검색(`$FDED` 등)으로 바로 찾아갑니다.
 
-### 5. 🔌 Apple //e Super Serial Card (SSC) 브릿지
-* AppleWin의 SSC TCP 소켓(기본 포트 1977) 또는 실제 물리 시리얼 COM 포트와 연결.
-* Apple II 콘솔과 웹 브라우저 간의 실시간 양방향 채팅 및 HTTP REST API 통신 지원.
+#### 4. 🛡️ 데이터 손상 방지
+* **자동 스냅샷 & 롤백**: 저장·삭제 직전 상태를 `backups/` 에 보존(최신 15개)하고, `[🛡️ 스냅샷 & 복원]` 에서 원하는 시점으로 되돌립니다.
+* **디스크 작업 순차 처리**: 동시에 들어온 요청이 VTOC(섹터 할당표)를 망가뜨리지 않게 줄 세워 처리합니다.
+* **BASIC 파일 I/O 검사**: `OPEN` 후 `CLOSE` 가 없으면 경고합니다(실기에서 파일이 안 닫혀 디스크가 상하는 것 방지).
 
-### 6. ⌨️📡 Apple II 원격 키보드 & 디스크 보기 (SSC 경유, 실기/STM32 공통)
-키보드가 고장 난 실기를 위해 만든 기능입니다. **`A2REMOTE.DSK`** 로 부팅하면 SSC(슬롯 2)가 키보드가 됩니다.
-* **원격 키보드**: 웹의 `⌨️ Apple 키보드` 칸에 `CATALOG`, `RUN 프로그램`, `10 PRINT "HI"`, `SAVE 이름` 등을 입력하면 SSC로 Apple에 그대로 타이핑됩니다 (화면 결과는 돌려받지 않음). Ctrl-C / RETURN / ESC 버튼, 여러 줄 붙여넣기 지원.
-* **디스크 보기**: `[📡 Apple에서 읽기]` 를 누르면 서버가 `BRUN A2SRV` 를 입력해 Apple 안의 작은 6502 섹터 서버(`apple2/a2srv.s`)를 띄우고, 드라이브 1을 읽어 `remote/drive1.dsk` 로 저장한 뒤 A2SRV를 끝내 `]` 프롬프트로 돌려 놓습니다. 웹의 파일 목록·BASIC 소스·Hex·디스어셈블리로 볼 수 있습니다 (읽기 전용).
-* A2SRV는 Disk II를 **니블 단위로 직접** 읽고, PC 쪽(`remote_disk.js`)이 4&4/6&2 디코딩과 체크섬 검사를 합니다. 기본으로 **VTOC에서 사용 중인 트랙만** 읽습니다 (A2REMOTE.DSK는 6트랙: 실기 9600bps에서 약 40초, STM32에서 약 7초).
-* A2SRV는 DOS가 기억하는 헤드 위치(`$047E`)에서 시작하고 끝날 때 그 자리로 되돌려 놓으므로, 읽은 뒤에도 DOS를 그대로 쓸 수 있습니다.
-* **메모리/ROM 덤프**: `[🧪 메모리/진단]` 창에서 주소 범위(예: `$D000-$FFFF`)와 맵(ROM / LC RAM bank 1·2 / //e 내부 CX ROM)을 골라 실기 메모리를 PC 파일(`remote/dumps/*.bin`)로 받습니다. 받은 덤프는 Hex Editor·6502 디스어셈블러로 바로 볼 수 있습니다.
-* **메모리 진단**: 기종 판별(ROM ID 바이트), 주 메모리 `$0200-$BFFF`·Language Card RAM 검사(내용 보존), ROM CRC32(2KB 칩 단위 포함)를 보여 줍니다. 오류가 있으면 주소·불량 데이터 비트·16KB 뱅크를 알려 줍니다.
-* STM32 에뮬레이터에서 같은 `A2REMOTE.DSK` 로 똑같이 동작하는 것을 확인했습니다 (ROM 덤프가 에뮬레이터 ROM 파일과 바이트 단위로 일치).
+### B. Super Serial Card로 Apple II 원격 제어
+
+키보드가 고장 난 실기를 위해 만든 기능입니다. 실기를 **`A2REMOTE.DSK`** 로 부팅하면 HELLO가 `IN#2` 를 실행해 SSC(슬롯 2)가 키보드가 됩니다. 이후 모든 일은 SSC 하나로 합니다. STM32 Apple //e 에뮬레이터에서도 같은 디스크로 똑같이 동작합니다.
+
+#### 5. ⌨️ 원격 키보드
+* 웹 상단 `⌨️ Apple 키보드` 칸에 입력하고 Enter를 누르면 SSC로 Apple에 그대로 타이핑됩니다. 예: `CATALOG`, `RUN SHOOTING`, `10 PRINT "HI"`, `SAVE MYPROG`, `PR#6`(재부팅).
+* `Ctrl-C` / `RETURN` / `ESC` 버튼, `여러 줄…` 붙여넣기(BASIC 프로그램 입력), 대문자 자동 변환, 최근 입력 기록.
+* Apple 화면 결과는 돌려받지 않습니다. 결과는 디스켓 읽기로 확인합니다(예: `SAVE` 후 목록 갱신).
+
+#### 6. 📡 Apple 디스켓 보기
+* `[📡 Apple에서 읽기]`: 서버가 `BRUN A2SRV` 를 입력해 Apple 안의 작은 6502 섹터 서버(A2SRV)를 띄우고, 드라이브 1을 읽어 `remote/drive1.dsk` 로 저장합니다. 끝나면 A2SRV를 내려 `]` 프롬프트로 돌려 놓습니다.
+* 디스크 선택을 `Apple II 드라이브 1` 로 바꾸면 PC 디스크와 똑같이 파일 목록·BASIC 소스·Hex·디스어셈블리로 봅니다(읽기 전용).
+* A2SRV는 DOS를 거치지 않고 Disk II를 **니블 단위로 직접** 읽습니다. 그래서 DOS가 없는 디스크도 읽힙니다. PC가 4&4/6&2 디코딩과 체크섬 검사를 합니다.
+* 기본으로 **VTOC에서 사용 중인 트랙만** 읽습니다. A2REMOTE.DSK는 6트랙으로, 실기 9600bps 약 40초, STM32 약 7초입니다. `35트랙 전체` 옵션도 있습니다.
+* 디스켓을 바꿔 넣고 다시 읽으면 그 디스켓이 보입니다. A2SRV가 없는 디스켓이면 SSC로 A2SRV를 보내 실행합니다.
+* 끝나면 헤드를 DOS가 기억하는 위치(`$047E`)로 되돌려 놓습니다. 그래서 읽은 뒤에도 DOS를 그대로 쓸 수 있습니다.
+
+#### 7. 🧪 메모리 / ROM 덤프 → PC 파일
+* `[🧪 메모리/진단]` 창에서 주소 범위와 맵을 고르면 Apple 메모리를 `remote/dumps/*.bin` 으로 받습니다. 맵: ROM / 현재 매핑 / Language Card RAM bank 1·2 / //e 내부 `$C100-$CFFF` ROM.
+* 빠른 선택: ROM `$D000-$FFFF`, 모니터 ROM `$F800-$FFFF`, //e CX ROM, 슬롯 6 ROM, RAM 48K.
+* 받은 덤프는 `보기` 로 Hex Editor·디스어셈블러에서 바로 엽니다.
+* 체크섬으로 전송을 검증합니다. `$C000-$C0FF`(I/O)는 읽으면 장치가 반응하므로 읽지 않습니다.
+
+#### 8. 🩺 메모리 진단 (Diagnostics)
+* **기종 판별**: ROM ID 바이트로 ][ / ][+ / //e / //e Enhanced / //c 를 구분합니다.
+* **RAM 검사**: 주 메모리 `$0200-$BFFF` 와 Language Card RAM을 4KB씩 백업 → 패턴 4가지 쓰기/확인 → 복원합니다. **메모리 내용이 보존**되므로 진단 후에도 DOS와 BASIC 프로그램이 그대로 남습니다. 고정 비트와 주소선 고장을 찾아 **주소, 불량 데이터 비트, 16KB 뱅크**를 알려 줍니다(불량 RAM 칩 찾기).
+* **ROM 검사**: `$D000-$FFFF` CRC32를 전체, 2KB 칩 단위(][/][+), 8KB 단위(//e)로 보여 주고 덤프 파일도 남깁니다. 정상 ROM과 비교해 ROM 칩 불량을 찾습니다.
+
+#### 9. 💽 디스켓의 A2SRV 최신화
+* 디스켓 기록 장치 없이, 실기 자신의 DOS로 디스켓의 A2SRV를 최신 버전으로 덮어씁니다(`UNLOCK` → `BSAVE` → `LOCK`).
+* 그다음 다시 읽어 바이트 단위로 확인합니다. 다른 DOS 3.3 디스켓에 A2SRV를 넣을 때도 씁니다.
+
+#### 10. 🔌 연결 방식
+| 대상 | 연결 | 실행 |
+| :--- | :--- | :--- |
+| Apple II 실기 | SSC ─ 널 모뎀 케이블 ─ USB-RS232 ─ PC COM 포트 (Python 릴레이) | `node server.js --serial COM12 --baud 9600` |
+| STM32F769I-DISCO Apple //e 에뮬레이터 | RJ45 직결, 보드 TCP 6502 = SSC | `npm run start:stm32` |
+| AppleWin | SSC TCP 소켓 1977 | `npm start` |
+
+### C. 🔒 보안
+* 서버는 기본으로 **이 PC(127.0.0.1)에서만** 열립니다. 로그인이 없고 원격 키보드는 Apple에 무엇이든 입력할 수 있기 때문입니다. 다른 기기에서 쓰려면 `--listen 0.0.0.0` 을 명시합니다.
+* Host 헤더가 localhost가 아닌 요청(DNS rebinding)과 다른 웹사이트에서 온 POST/DELETE(CSRF)를 거절합니다.
+* 오류 응답에 스택 트레이스나 PC 경로를 내보내지 않습니다.
+
+### ⚠️ 알려진 제약
+* **Ctrl-C**: Applesoft는 실행 중인 프로그램을 멈출 때 키보드 하드웨어(`$C000`)를 직접 봅니다. 그래서 원격 Ctrl-C는 프로그램이 입력을 기다릴 때만 통합니다. Control-Reset은 시리얼로 보낼 수 없습니다.
+* **화면 미반환**: Apple 화면을 웹으로 돌려받지 않습니다. `CATALOG` 가 한 화면을 넘어 키를 기다리면 `RETURN` 을 눌러 줍니다.
+* **첫 디스켓 만들기**: 키보드가 안 되면 ADTPro처럼 Apple 쪽에서 명령을 쳐야 하는 도구는 못 씁니다. Floppy Emu 같은 디스크 에뮬레이터나 PC용 플로피 기록 장치(Greaseweazle, Applesauce)로 `a2remote.dsk` 를 처음 한 번 준비해야 합니다.
+* **검사 범위**: //e 보조 64KB(80컬럼 카드)는 진단하지 않습니다. RAM 검사는 4KB 블록 단위라 블록끼리 겹치는 주소선 고장은 못 찾습니다.
+* **//c 미지원**: SSC 슬롯이 없는 //c(내장 시리얼 포트)는 시험하지 않았습니다.
+* **실기 미시험**: STM32 에뮬레이터에서 모두 확인했지만 실기에서는 아직 시험 전입니다. 글자가 빠지면 `remote_disk.js` 의 입력 간격(실기: 글자 2ms, 줄 400ms)을 늘리세요.
 
 ---
 
 ## 🏛️ 시스템 아키텍처 (Architecture)
 
 ```
-+-----------------------------------+             +----------------------------------+
-|    Apple II / AppleWin Emulator   |             |       Node.js Backend Server     |
-|                                   |             |                                  |
-|   +---------------------------+   |             |   +--------------------------+   |
-|   | apple2-web.dsk            |   |             |   | Express Server (3000)    |   |
-|   | - HELLO (Boot Welcome)    |   |             |   | - REST API /api/files    |   |
-|   | - WEBCLIENT (Terminal)    |   |             |   | - Static Web Dashboard   |   |
-|   | - FPBASIC, INTBASIC...    |   |             |   +------------+-------------+   |
-|   +-------------+-------------+   |                          |                     |
-|                 |                 |             +------------v-------------+       |
-|   +-------------v-------------+   | Disk File   | Python AC-Tool &         |       |
-|   | DOS 3.3 Disk Engine       | <-+-------------+ AppleCommander Engine    |       |
-|   | (Real-time File Access)   |   |             | (Tokenize & Put/Export)  |       |
-|   +---------------------------+   |             +--------------------------+       |
-+-----------------------------------+                                                |
-                                                                                     |
-                                                  +----------------------------------v---+
-                                                  | Modern Web Client (Browser)          |
-                                                  | (http://localhost:3000)              |
-                                                  | ------------------------------------ |
-                                                  | 📁 DOS 3.3 Catalog File List         |
-                                                  | 📝 Applesoft BASIC Code Editor       |
-                                                  | 📊 3-Column Interactive Hex Editor   |
-                                                  | ⚙️ 6502/65C02 Real-time Disassembler |
-                                                  +--------------------------------------+
+ 브라우저 (http://localhost:3000)
+ ┌──────────────────────────────────────────────────────────────┐
+ │ 📁 파일 목록  📝 BASIC  📊 Hex  ⚙️ 6502 Disasm                │
+ │ 💽 디스크 선택(로컬 / Apple 드라이브 1)  ⌨️ 원격 키보드        │
+ │ 🧪 메모리 덤프 · 진단 · 디스켓 A2SRV 갱신                      │
+ └───────────────────────────┬──────────────────────────────────┘
+                             │ REST (127.0.0.1)
+ Node.js server.js ──────────┴───────────────────────────────────────────┐
+ │  /api/files ── ac_tool.py ── AppleCommander ── apple2-web.dsk (로컬)    │
+ │                                            └── remote/drive1.dsk (사본) │
+ │  /api/remote/* ── remote_disk.js (타이핑, A2SRV 실행, 4&4/6&2 디코딩,   │
+ │                   메모리 덤프, RAM 검사)                                │
+ │                       │ bridge.js (TCP 바이트 스트림)                   │
+ └───────────────────────┼─────────────────────────────────────────────────┘
+          ┌──────────────┼──────────────────────┬─────────────────────┐
+          ▼              ▼                      ▼                     ▼
+  tools/com_relay.py  STM32 보드 TCP 6502   AppleWin TCP 1977     (Wi-Fi 모뎀 등)
+  (pyserial) ─ COMx      │                      │
+          │              ▼                      ▼
+          ▼        에뮬레이터 //e SSC      AppleWin SSC
+   실기 Apple II SSC (슬롯 2)
+          │  A2REMOTE.DSK 부팅: HELLO → IN#2 (SSC = 키보드)
+          │  A2SRV ($6000): Disk II 니블 읽기 / 메모리 덤프 / RAM 검사
+          ▼
+   Disk II (슬롯 6, 드라이브 1)
 ```
 
 ---
-
 ## 🚀 빠른 시작 (Quick Start)
 
 ### 1. 사전 요구사항
@@ -194,7 +235,15 @@ npm run build:remote-dsk
 | `HELLO` | 부팅 시 실행. `PRINT CHR$(4);"IN#2"` 로 DOS 입력을 SSC(슬롯 2)로 돌림 → PC가 키보드 |
 | `A2SRV` | `$6000` 섹터 서버. 서버가 `BRUN A2SRV` 로 실행해 디스크를 읽고, 끝나면 BASIC으로 RTS |
 
-이 이미지를 실제 5.25" 디스켓에 기록합니다 (ADTPro, 또는 Disk II를 PC에 연결하는 Applesauce/Greaseweazle 등).
+이 이미지를 실기에서 부팅할 수 있게 준비합니다. 키보드가 안 되는 기계에서는 ADTPro처럼 Apple 쪽에서 명령을 쳐야 하는 도구를 쓸 수 없으므로 다음 중 하나를 씁니다.
+
+| 방법 | 설명 |
+| :--- | :--- |
+| 디스크 에뮬레이터 (Floppy Emu 등) | Disk II 자리에 꽂고 SD 카드의 `a2remote.dsk` 를 바로 부팅 (가장 간단) |
+| PC용 플로피 기록 장치 (Greaseweazle, Applesauce, FluxEngine) | `.dsk` 를 실제 5.25" 디스켓에 기록 |
+| 키보드가 되는 다른 Apple II | ADTPro로 디스켓 기록 |
+
+한 번 만들어 두면 이후 A2SRV 갱신은 웹의 `💽 디스켓에 최신 A2SRV 저장` 으로 실기가 직접 합니다.
 
 #### ② 실기 연결
 ```
@@ -284,7 +333,7 @@ A2SRV를 고쳤다면 `npm run build:a2srv` (MSYS2 `xa` 어셈블러) 후 `npm r
 
 | 명령 | 응답 |
 | :--- | :--- |
-| `$AA 'P'` | `A2SV1` |
+| `$AA 'P'` | `A2SV2` (숫자는 버전) |
 | `$AA 'T' <트랙>` | 읽은 섹터마다 `'S'` + 주소 니블 8 + 데이터 니블 343, 끝에 `'E' 0` (일부 못 읽으면 `'X' <남은 수>`) |
 | `$AA 'Q'` | 헤드를 DOS 위치로 되돌리고 `'Q'`, 호출한 곳(BASIC/모니터)으로 RTS. SSC 입력은 그대로 |
 | `$AA 'M' 주소(2) 길이(2) 맵` | `'M'` + 메모리 바이트 + 16비트 합(2). 맵 비트: 0 ROM, 1 LC bank 1, 2 LC bank 2, 3 //e INTCXROM |
@@ -351,7 +400,7 @@ Apple II 실기의 **Super Serial Card (Slot 2)**와 PC를 통신 브릿지로 �
 [Apple II 실기 SSC (DB-25)] ──> [RetroWiFiModem / WiModem232 (ESP8266)] ──> 📶 [가정용 Wi-Fi] ──> [PC Node.js 서버]
 ```
 1. Apple II 뒷면 DB-25 포트에 **RetroWiFiModem** 또는 **WiModem232** 동글을 직접 꽂습니다.
-2. 모뎀 설정에서 홈 Wi-Fi에 연결한 후, PC의 Node.js `bridge.js`에서 모뎀의 IP와 포트로 TCP 소켓을 연결하면 케이블 없이 무선으로 실기와 PC가 실시간 연동됩니다.
+2. 모뎀을 홈 Wi-Fi에 연결하고, 모뎀이 TCP 서버(수신 대기) 모드로 SSC의 바이트를 그대로 넘기도록 설정한 뒤 `node server.js --host <모뎀 IP> --port <포트>` 로 접속합니다. (이 방식은 아직 시험하지 않았습니다. 모뎀이 AT 명령/텔넷 협상을 끼워 넣지 않는 투명 모드여야 A2SRV 통신이 됩니다.)
 
 ---
 
@@ -364,11 +413,13 @@ apple2-web/
 │   ├── HELLO.BAS          # DOS 3.3 기본 부팅 환영 프로그램 소스
 │   ├── WEBCLIENT.BAS      # Apple II SSC 웹 클라이언트 & 브릿지 소스
 │   ├── REMOTE_HELLO.BAS   # A2REMOTE.DSK의 HELLO (IN#2: SSC를 키보드로)
-│   ├── a2srv.s            # A2SRV: SSC로 Disk II 섹터를 보내는 6502 섹터 서버 (xa 문법)
+│   ├── a2srv.s            # A2SRV: Disk II 섹터·메모리 덤프·RAM 검사를 SSC로 하는 6502 서버 (xa 문법)
 │   └── a2srv.bin          # 어셈블된 A2SRV ($6000)
-├── remote/                # SSC로 읽어 온 Apple 드라이브 1 사본 drive1.dsk (git 제외)
+├── remote/                # (git 제외) SSC로 읽어 온 Apple 데이터
+│   ├── drive1.dsk         #   드라이브 1 디스켓 사본
+│   └── dumps/             #   메모리/ROM 덤프 *.bin
 ├── public/
-│   └── index.html         # 레트로 CRT 테마 웹 대시보드, Hex Editor & 6502 Disassembler
+│   └── index.html         # 웹 UI: 파일 목록, BASIC, Hex, 디스어셈블러, 원격 키보드, 메모리/진단
 ├── tools/
 │   ├── AppleCommander.jar # AppleCommander DOS 3.3 디스크 처리 엔진
 │   ├── com_relay.py       # 실기 COM 포트 ↔ TCP 중계 (pyserial)
@@ -378,8 +429,8 @@ apple2-web/
 ├── build_remote_dsk.py    # 실기 부팅용 a2remote.dsk 빌더 (HELLO + A2SRV)
 ├── a2remote.dsk           # 실기 부팅용 원격 키보드 디스크
 ├── bridge.js              # Apple II SSC <-> TCP/시리얼 브릿지 모듈
-├── remote_disk.js         # SSC 원격 타이핑, A2SRV 실행, 트랙 요청, 4&4/6&2 디코딩, .dsk 생성 (CLI 겸용)
-├── server.js              # Express HTTP 서버, DOS 3.3 파일 관리, 디스크 뮤텍스 & 롤백 API
+├── remote_disk.js         # SSC 원격 타이핑, A2SRV 실행, 4&4/6&2 디코딩, 메모리 덤프, RAM 진단 (CLI 겸용)
+├── server.js              # Express 서버: DOS 3.3 파일 API, 백업/롤백, 원격(/api/remote/*), 접근 제한
 ├── apple2-web.dsk         # 부팅 가능한 실시간 Apple II DOS 3.3 디스크 이미지
 ├── package.json           # Node.js 프로젝트 설정 및 의존성
 └── README.md              # 프로젝트 안내 문서
