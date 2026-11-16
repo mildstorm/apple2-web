@@ -248,7 +248,10 @@ Apple이 `]` 프롬프트에서 SSC 입력을 기다리는 상태에서 씁니�
 * **ROM**: `$D000-$FFFF` CRC32(전체, 2KB 칩 단위, //e 8KB 단위)를 보여 주고 덤프 파일도 남깁니다. 정상 ROM 덤프의 CRC32와 비교하면 ROM 칩 불량을 찾을 수 있습니다.
 * 소요: STM32 약 15초, 실기 9600bps 약 1분(ROM CRC 포함).
 
-> 디스켓의 A2SRV가 이 기능이 없는 구버전이면, 서버가 이를 알아채고 새 A2SRV를 모니터 헥스로 SSC를 통해 보내 실행합니다 (느림). `npm run build:remote-dsk` 로 디스크를 다시 만들어 기록하면 빠르게 `BRUN` 됩니다.
+> 디스켓의 A2SRV가 이 기능이 없는 구버전이면, 서버가 이를 알아채고 새 A2SRV를 모니터 헥스로 SSC를 통해 보내 실행합니다 (느림).
+
+**디스켓의 A2SRV 최신화 (디스켓 기록 장치 없이)**
+`[🧪 메모리/진단]` → `③ 💽 드라이브 1 디스켓에 최신 A2SRV 저장`. 서버가 최신 A2SRV를 SSC로 `$6000` 에 올리고 (`CALL-151`, 헥스 줄, `3D0G`), 웹 키보드로 `UNLOCK A2SRV` → `BSAVE A2SRV,A$6000,L…` → `LOCK A2SRV` 를 입력해 **실기 자신의 DOS로 디스켓에 덮어씁니다**. 그다음 디스크를 다시 읽어 디스켓의 A2SRV가 `apple2/a2srv.bin` 과 바이트 단위로 같은지 확인합니다. 디스켓에 쓰기 방지 탭이 없어야 하며, 이후로는 `BRUN A2SRV` 로 바로 실행되어 빨라집니다. A2SRV가 없는 다른 DOS 3.3 디스켓에도 같은 방법으로 넣을 수 있습니다.
 
 #### STM32 에뮬레이터로 같은 동작 확인
 ```bash
@@ -312,6 +315,7 @@ A2SRV는 트랙을 먼저 `$6600-$85FF`에 모두 읽은 뒤 한꺼번에 보냅
 | `GET` | `/api/remote/dumps/:file` | 덤프 파일 다운로드 (`?format=hex` 면 JSON hex) |
 | `POST` | `/api/remote/diag` | `{ "lc": true, "rom": true }` 메모리 진단 시작 (202) |
 | `GET` | `/api/remote/diag` | 마지막 진단 결과 |
+| `POST` | `/api/remote/update-a2srv` | 드라이브 1 디스켓에 최신 A2SRV를 BSAVE하고 다시 읽어 확인 (202) |
 
 파일 조회 API(`/api/files`, `/api/files/:filename`, `/api/download/dsk`)에 **`?disk=remote`** 를 붙이면 Apple에서 읽어 온 디스크를 대상으로 합니다 (쓰기 API는 403).
 

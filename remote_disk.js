@@ -357,6 +357,35 @@ class RemoteDisk extends EventEmitter {
     return this._loadViaBoard(log, bin, lines);
   }
 
+  /**
+   * Write the current apple2/a2srv.bin onto the floppy in the drive, with the
+   * Apple's own DOS: the program goes into $6000 as monitor hex lines over
+   * the SSC (not run), 3D0G returns to BASIC, and BSAVE A2SRV stores it.
+   * The Apple must be at the BASIC prompt with DOS and SSC input (A2REMOTE).
+   */
+  async installA2srv(log = () => {}) {
+    if (this.serverRunning) await this.quit();
+    const { bin, lines } = this._hexLines();
+    log(`A2SRV ${bin.length}바이트를 모니터로 $${LOAD_ADDR.toString(16).toUpperCase()}에 올립니다 (SSC).`);
+    this._send([0x18]);
+    await this.type('CALL-151');
+    await this.type(lines.join('\r'));
+    await this.type('3D0G');
+    // The A2SRV on the disk is locked (AppleCommander and LOCK below), and
+    // BSAVE onto a locked file stops with FILE LOCKED. On a disk without it,
+    // UNLOCK just says FILE NOT FOUND.
+    const cmd = `BSAVE A2SRV,A$${LOAD_ADDR.toString(16).toUpperCase()},L${bin.length}`;
+    log(`UNLOCK A2SRV → ${cmd} → LOCK A2SRV 입력 - 디스켓에 저장`);
+    const diskWait = this.baud ? 5000 : 2500;
+    await this.type('UNLOCK A2SRV');
+    await sleep(diskWait);
+    await this.type(cmd);
+    await sleep(diskWait + 1500); // DOS writes the file
+    await this.type('LOCK A2SRV');
+    await sleep(diskWait);
+    return { bytes: bin.length, command: cmd };
+  }
+
   /** STM32 emulator only: get to the monitor with the board's own ports. */
   async _loadViaBoard(log, bin, lines) {
     let { state } = await this.promptState();

@@ -689,6 +689,49 @@ app.post('/api/remote/diag', (req, res) => {
   });
 });
 
+// ---- 디스켓의 A2SRV를 최신으로: SSC로 메모리에 올리고 Apple의 DOS로 BSAVE ----
+// 그 뒤 디스크를 읽어 디스켓의 A2SRV가 apple2/a2srv.bin 과 같은지 확인
+app.post('/api/remote/update-a2srv', (req, res) => {
+  if (!requireRemote(res)) return;
+  remoteState.job = 'update';
+  remoteState.phase = 'loading';
+  remoteState.done = 0;
+  remoteState.total = 0;
+  remoteState.log = [];
+  remoteLog('디스켓의 A2SRV 갱신 시작...');
+  res.status(202).json({ success: true, message: '디스켓의 A2SRV를 최신으로 바꾸는 중입니다.' });
+
+  (async () => {
+    try {
+      if (remoteDisk.serverRunning === null) await remoteDisk.ping();
+      await remoteDisk.installA2srv(remoteLog);
+      remoteState.phase = 'reading';
+      remoteLog('확인: 디스크를 읽어 A2SRV를 비교합니다...');
+      await remoteDisk.load(remoteLog);
+      const r = await remoteDisk.readDisk({ onProgress: (p) => { remoteState.done = p.done || 0; remoteState.total = p.total || 0; } });
+      try { await remoteDisk.quit(); } catch (e) {}
+      fs.mkdirSync(REMOTE_DIR, { recursive: true });
+      fs.writeFileSync(REMOTE_DSK, r.image);
+      const tmp = path.join(REMOTE_DIR, `_a2srv_check_${Date.now()}.bin`);
+      await new Promise((resolve, reject) => execFile(PYTHON_CMD, [AC_TOOL, 'get', REMOTE_DSK, 'A2SRV', tmp], (err, so, se) => (err ? reject(new Error(se || err.message)) : resolve())));
+      const onDisk = fs.existsSync(tmp) ? fs.readFileSync(tmp) : Buffer.alloc(0);
+      try { fs.unlinkSync(tmp); } catch (e) {}
+      const want = fs.readFileSync(path.join(__dirname, 'apple2', 'a2srv.bin'));
+      if (Buffer.compare(onDisk, want) !== 0) {
+        throw new Error(`디스켓의 A2SRV(${onDisk.length}바이트)가 최신(${want.length}바이트)과 다릅니다. 쓰기 방지 탭이나 디스크 상태를 확인하세요.`);
+      }
+      remoteState.phase = 'done';
+      remoteLog(`완료: 디스켓의 A2SRV가 최신(v${remoteDisk.version}, ${want.length}바이트)과 바이트 단위로 같습니다.`);
+    } catch (e) {
+      remoteState.phase = 'error';
+      remoteLog(`오류: ${e.message}`);
+      if (remoteDisk.serverRunning) {
+        try { await remoteDisk.quit(); } catch (e2) {}
+      }
+    }
+  })();
+});
+
 app.get('/api/remote/diag', (req, res) => {
   res.json({ report: remoteState.diag || null });
 });

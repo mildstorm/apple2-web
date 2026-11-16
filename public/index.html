@@ -823,6 +823,16 @@
           $0000-$01FF(제로페이지/스택), $6000-$64FF(A2SRV 코드), //e 보조 메모리(80컬럼)는 검사하지 않습니다.
         </div>
         <div id="diag-result" style="margin-top:10px;"></div>
+
+        <h4 style="color: var(--green); margin: 16px 0 6px;">③ 디스켓의 A2SRV 최신화</h4>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+          <button class="btn" onclick="updateFloppyA2srv()">💽 드라이브 1 디스켓에 최신 A2SRV 저장</button>
+          <span id="update-result" style="color: var(--text-dim);"></span>
+        </div>
+        <div style="color: var(--text-dim); margin-top:4px;">
+          최신 A2SRV를 SSC로 $6000에 올린 뒤 Apple의 DOS로 <code>BSAVE A2SRV,A$6000,L…</code> 해서 드라이브의 디스켓에 덮어쓰고,
+          디스크를 다시 읽어 바이트 단위로 확인합니다. 디스켓에 쓰기 방지 탭이 없어야 합니다. 이후 덤프/진단/디스크 읽기가 <code>BRUN</code>으로 빨라집니다.
+        </div>
       </div>
       <div class="modal-footer" style="padding: 10px 16px; display: flex; justify-content: flex-end; border-top: 1px solid var(--border); background: #0b120b;">
         <button class="btn btn-secondary" onclick="closeMemModal()">닫기</button>
@@ -1946,6 +1956,19 @@
       document.getElementById('diag-result').innerHTML = '<span style="color:var(--amber);">진단 중... (실기 9600bps에서 약 1분)</span>';
       if (!(await postJob('/api/remote/diag', body))) return;
       watchJob('diag', () => { loadDiagReport(); loadDumpList(); });
+    }
+
+    async function updateFloppyA2srv() {
+      if (!confirm('드라이브 1의 디스켓에 최신 A2SRV를 BSAVE로 덮어씁니다. 계속할까요?')) return;
+      const out = document.getElementById('update-result');
+      out.textContent = '진행 중...';
+      out.style.color = 'var(--amber)';
+      if (!(await postJob('/api/remote/update-a2srv', {}))) { out.textContent = ''; return; }
+      watchJob('update', (s) => {
+        out.textContent = s.message;
+        out.style.color = s.phase === 'done' ? 'var(--green)' : 'var(--red)';
+        if (s.phase === 'done' && currentDisk === 'remote') loadFiles();
+      });
     }
 
     function ramBlockHtml(title, r) {
