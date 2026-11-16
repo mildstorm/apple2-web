@@ -1,5 +1,7 @@
 # Apple II Web - DOS 3.3 디스크 관리 · 원격 키보드 · 메모리 진단
 
+**한국어** | [English](README.en.md)
+
 [![Platform](https://img.shields.io/badge/Platform-Apple%20II%2B%20%2F%20%2F%2Fe-brightgreen)](https://github.com/mildstorm/apple2-web)
 [![Node.js](https://img.shields.io/badge/Node.js-v18%2B-blue)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -7,8 +9,8 @@
 **apple2-web**은 웹 브라우저(`http://localhost:3000`)에서 Apple II를 다루는 도구입니다. 두 가지 일을 합니다.
 
 1. **PC의 디스크 이미지 작업**: DOS 3.3 디스크 이미지(`.dsk`)의 파일을 보고, 고치고, 넣고, 지웁니다. Applesoft BASIC 편집기, 3단 Hex Editor, 6502/65C02 디스어셈블러가 들어 있습니다.
-2. **Super Serial Card(SSC)로 Apple II 원격 제어**: 실기(키보드가 고장 난 기계 포함)나 STM32 Apple //e 에뮬레이터를 SSC로 연결해 다음을 합니다.
-   * 웹에서 명령을 **타이핑**합니다.
+2. **Apple II 원격 제어**: 실기(키보드가 고장 난 기계 포함)나 STM32 Apple //e 에뮬레이터를 연결해 다음을 합니다.
+   * 웹에서 명령을 **타이핑**합니다 (Super Serial Card(SSC)로, 또는 **카세트 입력에 소리로**).
    * 드라이브의 **디스켓 내용을 읽어** 봅니다.
    * **메모리/ROM을 덤프**해 PC 파일로 받습니다.
    * **RAM·ROM 상태를 진단**합니다.
@@ -60,7 +62,7 @@
 * **디스크 작업 순차 처리**: 동시에 들어온 요청이 VTOC(섹터 할당표)를 망가뜨리지 않게 줄 세워 처리합니다.
 * **BASIC 파일 I/O 검사**: `OPEN` 후 `CLOSE` 가 없으면 경고합니다(실기에서 파일이 안 닫혀 디스크가 상하는 것 방지).
 
-### B. Super Serial Card로 Apple II 원격 제어
+### B. Apple II 원격 제어 (SSC · 카세트 입력)
 
 키보드가 고장 난 실기를 위해 만든 기능입니다. 실기를 **`A2REMOTE.DSK`** 로 부팅하면 HELLO가 입력 드라이버 **A2KBDA** 를 띄웁니다. 이후 Apple은 **실제 키보드, SSC(슬롯 2), 카세트 입력(PC 소리)** 어디서 들어온 키든 받습니다. 디스켓 보기·덤프·진단은 SSC로 합니다. STM32 Apple //e 에뮬레이터에서도 같은 디스크로 동작합니다.
 
@@ -100,7 +102,8 @@
 | 대상 | 연결 | 실행 |
 | :--- | :--- | :--- |
 | Apple II 실기 | SSC ─ 널 모뎀 케이블 ─ USB-RS232 ─ PC COM 포트 (Python 릴레이) | `node server.js --serial COM12 --baud 9600` |
-| STM32F769I-DISCO Apple //e 에뮬레이터 | RJ45 직결, 보드 TCP 6502 = SSC | `npm run start:stm32` |
+| Apple II 실기, 오디오 키 입력 | PC 이어폰/라인 출력 ─ 3.5mm 케이블 ─ 카세트 IN | (어느 모드든, 전송: `🔊 오디오`) |
+| STM32F769I-DISCO Apple //e 에뮬레이터 | RJ45 직결, 보드 TCP 6502 = SSC, TCP 6503 = 카세트 입력 | `npm run start:stm32` |
 | AppleWin | SSC TCP 소켓 1977 | `npm start` |
 
 ### C. 🔒 보안
@@ -135,12 +138,13 @@
  │                                            └── remote/drive1.dsk (사본) │
  │  /api/remote/* ── remote_disk.js (타이핑, A2SRV 실행, 4&4/6&2 디코딩,   │
  │                   메모리 덤프, RAM 검사)                                │
+ │                 └ audio_keys.js (키 → 카세트 패킷)                      │
  │                       │ bridge.js (TCP 바이트 스트림)                   │
  └───────────────────────┼─────────────────────────────────────────────────┘
           ┌──────────────┼──────────────────────┬─────────────────────┐
           ▼              ▼                      ▼                     ▼
   tools/com_relay.py  STM32 보드 TCP 6502   AppleWin TCP 1977     (Wi-Fi 모뎀 등)
-  (pyserial) ─ COMx      │                      │
+  (pyserial) ─ COMx      │  (+ TCP 6503 카세트 입력)
           │              ▼                      ▼
           ▼        에뮬레이터 //e SSC      AppleWin SSC
    실기 Apple II SSC (슬롯 2)        audio_keys.js ─ PC 소리 출력 ─┐
@@ -189,9 +193,9 @@ npm install
 > * Host 헤더가 localhost가 아닌 요청(DNS rebinding)과, 다른 웹사이트에서 보낸 POST/DELETE(CSRF)는 거절합니다.
 
 ### 4. 키보드 없는 실기를 웹으로 쓰기 (요약)
-1. `npm run build:remote-dsk` 로 만든 `a2remote.dsk` 를 디스켓에 기록해 실기에 넣고 부팅 → SSC가 키보드가 됩니다.
+1. `npm run build:remote-dsk` 로 만든 `a2remote.dsk` 를 디스켓에 기록해 실기에 넣고 부팅 → SSC와 카세트 입력이 키보드가 됩니다.
 2. `node server.js --serial COMx --baud 9600` 실행 후 브라우저 접속.
-3. `⌨️ Apple 키보드` 칸에 `CATALOG`, `RUN 이름`, BASIC 줄, `SAVE 이름` 등을 입력하고 Enter.
+3. `⌨️ Apple 키보드` 칸에 `CATALOG`, `RUN 이름`, BASIC 줄, `SAVE 이름` 등을 입력하고 Enter (전송: SSC 또는 🔊 오디오).
 4. `[📡 Apple에서 읽기]` 로 실기 드라이브 1의 파일 목록을 갱신하고, 파일을 눌러 BASIC 소스·Hex·디스어셈블리로 확인.
 5. `[🧪 메모리/진단]` 으로 ROM/메모리를 PC 파일로 덤프하거나, RAM·ROM 상태를 진단.
 
@@ -238,7 +242,7 @@ npm install
 ```bash
 npm run build:remote-dsk
 ```
-`a2remote.dsk` 가 생성됩니다 (웹의 `💾 A2REMOTE.DSK` 버튼으로도 받을 수 있음). 내용은 DOS 3.3 + 두 파일뿐입니다.
+`a2remote.dsk` 가 생성됩니다 (웹의 `💾 A2REMOTE.DSK` 버튼으로도 받을 수 있음). 내용은 DOS 3.3 + 세 파일뿐입니다.
 
 | 파일 | 역할 |
 | :--- | :--- |
@@ -359,7 +363,7 @@ node remote_disk.js dump remote/drive1.dsk
 ```
 `--host/--port` 로 대상(기본 `169.254.246.139:6502`), `--baud 9600` 으로 실기 속도, `--full` 로 35트랙 전체를 지정합니다. PC에 169.254 대역 인터페이스가 여럿이면 `BRIDGE_LOCAL_ADDR` 환경 변수로 소스 주소를 고정합니다.
 
-A2SRV를 고쳤다면 `npm run build:a2srv` (MSYS2 `xa` 어셈블러) 후 `npm run build:remote-dsk` 로 디스크를 다시 만듭니다.
+A2SRV나 A2KBDA를 고쳤다면 `npm run build:a2srv` / `npm run build:a2kbda` (MSYS2 `xa` 어셈블러) 후 `npm run build:remote-dsk` 로 디스크를 다시 만듭니다.
 
 **A2SRV 프로토콜** (PC → Apple: `$AA` 동기 바이트 + 명령)
 
@@ -391,7 +395,7 @@ A2SRV는 트랙을 먼저 `$6600-$85FF`에 모두 읽은 뒤 한꺼번에 보냅
 | `POST` | `/api/backups/create` | 수동 디스크 체크포인트 스냅샷 생성 |
 | `GET` | `/api/download/dsk` | 수정된 `apple2-web.dsk` 디스크 이미지 파일 다운로드 |
 | `GET` | `/api/remote/status` | SSC 연결(실기/STM32), A2SRV 실행 여부, 읽기 진행, 마지막 읽기 결과, 최근 입력 |
-| `POST` | `/api/remote/type` | `{ "text": "CATALOG" }` 를 Apple에 타이핑 (줄마다 RETURN). `{ "key": "ctrl-c" \| "return" \| "esc" }`. `"via": "audio"` 면 PC 소리로 (기본 `"ssc"`) |
+| `POST` | `/api/remote/type` | `{ "text": "CATALOG" }` 를 Apple에 타이핑 (줄마다 RETURN). `{ "key": "ctrl-c" \| "return" \| "esc" }`. `"via": "audio"` 면 PC 소리로 (기본 `"ssc"`), `--stm32` 면 보드 카세트 입력으로 |
 | `GET` | `/api/remote/audio.wav` | `?text=CATALOG` 의 오디오 키 입력 WAV (다른 기기에서 재생용) |
 | `POST` | `/api/remote/sync` | `BRUN A2SRV` → 드라이브 1 읽기 → `remote/drive1.dsk` 저장 → A2SRV 종료. `{ "full": true }` 면 35트랙 전체 (202, 진행은 status로) |
 | `POST` | `/api/remote/quit` | 떠 있는 A2SRV 종료 (BASIC 프롬프트로) |
@@ -461,15 +465,16 @@ apple2-web/
 │   └── dos33_template.dsk # 초기 DOS 3.3 기본 디스크 템플릿
 ├── ac_tool.py             # AppleCommander CLI 래퍼 (json, get, put, put-basic, delete)
 ├── build_dsk.py           # Applesoft BASIC 토크나이저 및 DSK 이미지 빌더
-├── build_remote_dsk.py    # 실기 부팅용 a2remote.dsk 빌더 (HELLO + A2SRV)
+├── build_remote_dsk.py    # 실기 부팅용 a2remote.dsk 빌더 (HELLO + A2SRV + A2KBDA)
 ├── a2remote.dsk           # 실기 부팅용 원격 키보드 디스크
 ├── bridge.js              # Apple II SSC <-> TCP/시리얼 브릿지 모듈
 ├── remote_disk.js         # SSC 원격 타이핑, A2SRV 실행, 4&4/6&2 디코딩, 메모리 덤프, RAM 진단 (CLI 겸용)
-├── audio_keys.js          # 오디오 키 입력: 텍스트 → 카세트 패킷 WAV, PC 소리 재생 (CLI 겸용)
+├── audio_keys.js          # 오디오 키 입력: 텍스트 → 카세트 패킷 WAV, PC 소리 재생 또는 STM32 TCP 6503 (CLI 겸용)
 ├── server.js              # Express 서버: DOS 3.3 파일 API, 백업/롤백, 원격(/api/remote/*), 접근 제한
 ├── apple2-web.dsk         # 부팅 가능한 실시간 Apple II DOS 3.3 디스크 이미지
 ├── package.json           # Node.js 프로젝트 설정 및 의존성
-└── README.md              # 프로젝트 안내 문서
+├── README.md              # 프로젝트 안내 문서 (한국어)
+└── README.en.md           # 프로젝트 안내 문서 (영어)
 ```
 
 ---
