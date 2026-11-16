@@ -9,7 +9,9 @@
     "remote:dump": "node remote_disk.js dump",
     "remote:quit": "node remote_disk.js quit",
     "build:a2srv": "xa -o apple2/a2srv.bin apple2/a2srv.s",
+    "build:a2kbda": "xa -o apple2/a2kbda.bin apple2/a2kbda.s",
     "build:remote-dsk": "python build_remote_dsk.py",
+    "test:audio": "python tools/test_a2kbda.py",
     "upload:stm32": "pwsh -File ../STM32CubeIDE/STM32F769I-DISCO/tools/sd-upload.ps1 apple2-web.dsk -Name A2WEB.DSK",
     "test": "node test_runner.js",
     "build:dsk": "python build_dsk.py"

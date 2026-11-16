@@ -594,6 +594,12 @@
     <button class="btn btn-secondary" onclick="sendRemoteKey('return')">RETURN</button>
     <button class="btn btn-secondary" onclick="sendRemoteKey('esc')">ESC</button>
     <label title="DOS 3.3 명령은 대문자여야 합니다"><input type="checkbox" id="remote-upper" checked> 대문자</label>
+    <select id="remote-via" class="input-text" style="width:auto; padding:3px 6px;" onchange="setRemoteVia(this.value)"
+            title="SSC: 시리얼 케이블 / 오디오: PC 소리 출력 → Apple 카세트 IN (A2KBDA, 볼륨 크게)">
+      <option value="ssc">전송: SSC</option>
+      <option value="audio">전송: 🔊 오디오</option>
+    </select>
+    <a id="remote-wav-link" class="btn btn-secondary" style="display:none;" href="#" onclick="return downloadRemoteWav()" title="입력 칸의 내용을 WAV로 받아 다른 기기(휴대폰 등)로 재생">🔊 WAV</a>
     <button class="btn btn-secondary" onclick="toggleMultiline()">여러 줄…</button>
     <a href="/api/download/a2remote" class="btn btn-secondary" title="실기에 넣어 부팅하는 디스크: 부팅하면 SSC가 키보드가 됩니다">💾 A2REMOTE.DSK</a>
     <span id="remote-type-msg" style="color: var(--text-dim);"></span>
@@ -1736,8 +1742,25 @@
     const remoteCmd = document.getElementById('remote-cmd');
     const remoteTypeMsg = document.getElementById('remote-type-msg');
 
+    // 키 전송 경로: SSC 또는 오디오(PC 소리 → Apple 카세트 IN)
+    let remoteVia = 'ssc';
+    function setRemoteVia(v) {
+      remoteVia = v === 'audio' ? 'audio' : 'ssc';
+      document.getElementById('remote-via').value = remoteVia;
+      document.getElementById('remote-wav-link').style.display = remoteVia === 'audio' ? '' : 'none';
+      try { localStorage.setItem('a2web.via', remoteVia); } catch (e) {}
+    }
+    try { setRemoteVia(localStorage.getItem('a2web.via') || 'ssc'); } catch (e) { setRemoteVia('ssc'); }
+
+    function downloadRemoteWav() {
+      const text = prepText(remoteCmd.value);
+      window.location.href = `/api/remote/audio.wav?text=${encodeURIComponent(text)}`;
+      return false;
+    }
+
     async function postType(payload, label) {
-      remoteTypeMsg.textContent = `보내는 중: ${label}`;
+      payload = Object.assign({ via: remoteVia }, payload);
+      remoteTypeMsg.textContent = remoteVia === 'audio' ? `🔊 소리 재생 중: ${label}` : `보내는 중: ${label}`;
       try {
         const res = await fetch('/api/remote/type', {
           method: 'POST',
@@ -1750,7 +1773,8 @@
           alert('입력 실패: ' + d.error);
           return false;
         }
-        remoteTypeMsg.textContent = `✔ ${new Date().toLocaleTimeString()} ${label}`;
+        const how = d.via === 'audio' ? ` (🔊 ${d.seconds.toFixed(1)}초)` : '';
+        remoteTypeMsg.textContent = `✔ ${new Date().toLocaleTimeString()} ${label}${how}`;
         pollRemoteStatus();
         return true;
       } catch (e) {

@@ -15,6 +15,7 @@ const fs = require('fs');
 const { exec, execFile } = require('child_process');
 const SerialBridge = require('./bridge');
 const { RemoteDisk, crc32 } = require('./remote_disk');
+const { typeByAudio, textToWav } = require('./audio_keys');
 
 const HTTP_PORT = parseInt(process.env.PORT || '3000', 10);
 const DSK_PATH = path.join(__dirname, 'apple2-web.dsk');
@@ -769,39 +770,81 @@ app.get('/api/remote/diag', (req, res) => {
   res.json({ report: remoteState.diag || null });
 });
 
-// 웹에서 입력한 명령을 SSC로 Apple 키보드처럼 입력 (화면 결과는 돌려받지 않음)
-// body: { text: "CATALOG", enter: true }  — 여러 줄이면 줄마다 RETURN
-//       { key: "ctrl-c" | "return" | "esc" | "ctrl-x" }
-app.post('/api/remote/type', async (req, res) => {
-  if (!requireRemote(res)) return;
-  const body = req.body || {};
-  const keys = { 'ctrl-c': '\x03', return: '\r', esc: '\x1b', 'ctrl-x': '\x18', 'ctrl-s': '\x13' };
-  let text;
+// 웹에서 입력한 명령을 Apple 키보드처럼 입력 (화면 결과는 돌려받지 않음)
+// body: { text: "CATALOG", enter: true, via: "ssc" | "audio" }  — 여러 줄이면 줄마다 RETURN
+//       { key: "ctrl-c" | "return" | "esc" | "ctrl-x", via: ... }
+// via=audio: PC 소리 출력 → Apple 카세트 IN (A2KBDA가 받음, audio_keys.js). SSC 연결이 없어도 됨.
+const REMOTE_KEYS = { 'ctrl-c': '\x03', return: '\r', esc: '\x1b', 'ctrl-x': '\x18', 'ctrl-s': '\x13' };
+
+function typedText(body) {
   let enter = body.enter !== false;
+  let text;
   if (body.key) {
-    text = keys[String(body.key).toLowerCase()];
-    if (text === undefined) return res.status(400).json({ error: `알 수 없는 키: ${body.key}` });
+    text = REMOTE_KEYS[String(body.key).toLowerCase()];
+    if (text === undefined) return { error: `알 수 없는 키: ${body.key}` };
     enter = false;
   } else {
     text = String(body.text || '');
-    if (!text && !enter) return res.status(400).json({ error: '입력할 내용이 없습니다.' });
-    if (text.length > 4000) return res.status(400).json({ error: '한 번에 4000자까지 보낼 수 있습니다.' });
-    // Apple 쪽에는 7비트 ASCII만
-    text = text.replace(/[^\x00-\x7f]/g, '');
+    if (!text && !enter) return { error: '입력할 내용이 없습니다.' };
+    if (text.length > 4000) return { error: '한 번에 4000자까지 보낼 수 있습니다.' };
+    text = text.replace(/[^\x00-\x7f]/g, ''); // Apple 쪽에는 7비트 ASCII만
   }
+  return { text, enter };
+}
+
+function remember(body, text, via) {
+  typedHistory.push({ at: new Date().toISOString(), via, text: body.key ? `<${body.key}>` : text });
+  if (typedHistory.length > 50) typedHistory.shift();
+}
+
+app.post('/api/remote/type', async (req, res) => {
+  const body = req.body || {};
+  const via = body.via === 'audio' ? 'audio' : 'ssc';
+  const t = typedText(body);
+  if (t.error) return res.status(400).json({ error: t.error });
+
+  if (via === 'audio') {
+    if (remoteDisk && (remoteDisk.busy || remoteState.phase === 'loading' || remoteState.phase === 'reading')) {
+      return res.status(409).json({ error: 'Apple이 디스크 읽기/덤프/진단 중이라 키를 받지 않습니다. 끝난 뒤 보내세요.' });
+    }
+    try {
+      // A2SRV가 떠 있으면 Apple이 키를 기다리지 않으므로 (SSC가 있으면) 먼저 BASIC으로
+      if (remoteDisk && remoteDisk.serverRunning && bridge.isConnected) await remoteDisk.quit();
+      // STM32 보드: 소리 대신 같은 신호를 보드의 카세트 입력(TCP 6503)으로
+      // (--audio-pc 면 보드여도 PC 스피커로 재생)
+      const board = isStm32 && !argv.includes('--audio-pc') ? { host: BRIDGE_HOST } : null;
+      const r = await typeByAudio(t.text, { enter: t.enter, board });
+      remember(body, t.text, 'audio');
+      return res.json({ success: true, via, to: board ? 'board' : 'speaker', seconds: r.seconds, packets: r.packets });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  if (!requireRemote(res)) return;
   try {
     // 서버 재시작 직후엔 A2SRV가 아직 떠 있는지 모름: 한 번만 확인
     if (remoteDisk.serverRunning === null) await remoteDisk.ping();
     if (remoteDisk.serverRunning) {
       await remoteDisk.quit(); // A2SRV가 SSC를 쥐고 있으면 먼저 BASIC으로
     }
-    await remoteDisk.type(text, { enter });
-    typedHistory.push({ at: new Date().toISOString(), text: body.key ? `<${body.key}>` : text });
-    if (typedHistory.length > 50) typedHistory.shift();
-    res.json({ success: true });
+    await remoteDisk.type(t.text, { enter: t.enter });
+    remember(body, t.text, 'ssc');
+    res.json({ success: true, via });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// 오디오 키 입력을 WAV 파일로 (휴대폰 등 다른 기기에서 재생해 Apple 카세트 IN에 넣을 때)
+// GET /api/remote/audio.wav?text=CATALOG[&enter=0]
+app.get('/api/remote/audio.wav', (req, res) => {
+  const t = typedText({ text: req.query.text, key: req.query.key, enter: req.query.enter !== '0' });
+  if (t.error) return res.status(400).json({ error: t.error });
+  const { wav } = textToWav(t.text, { enter: t.enter });
+  res.set('Content-Type', 'audio/wav');
+  res.set('Content-Disposition', 'attachment; filename="a2kbda.wav"');
+  res.send(wav);
 });
 
 // A2SRV가 떠 있으면 끝내고 BASIC 프롬프트로

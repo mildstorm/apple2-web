@@ -23,7 +23,7 @@
 | 📝 편집 | Applesoft BASIC 텍스트 ↔ 토큰 자동 변환, `OPEN`/`CLOSE` 누락 검사 | 로컬 디스크 |
 | 📊 분석 | 3단 Hex Editor, 6502/65C02 디스어셈블러(ROM 심볼 주석, 분기 계산) | 파일·디스크·메모리 덤프 |
 | 🛡️ 안전 | 저장 전 자동 스냅샷(15개) + 원클릭 롤백, 디스크 작업 순차 처리 | 로컬 디스크 |
-| ⌨️ 원격 키보드 | 웹 입력을 SSC로 Apple에 타이핑 (`CATALOG`, `RUN`, BASIC 줄, `SAVE` …), Ctrl-C/RETURN/ESC, 여러 줄 붙여넣기 | 실기 / STM32 / AppleWin |
+| ⌨️ 원격 키보드 | 웹 입력을 Apple에 타이핑 (`CATALOG`, `RUN`, BASIC 줄, `SAVE` …), Ctrl-C/RETURN/ESC, 여러 줄 붙여넣기 — **SSC** 또는 **🔊 오디오(카세트 IN)** 로 | 실기 / STM32 / AppleWin |
 | 📡 디스켓 보기 | Apple 드라이브 1을 SSC로 읽어 파일 목록·BASIC·Hex·디스어셈블리로 보기 (DOS 없이 니블 단위로 읽음) | 실기 / STM32 |
 | 🧪 메모리 덤프 | 주소 범위의 RAM·ROM·Language Card·//e 내부 ROM을 `.bin` 파일로 | 실기 / STM32 |
 | 🩺 진단 | 기종 판별, 주 메모리·LC RAM 검사(내용 보존), ROM CRC32(칩 단위) | 실기 / STM32 |
@@ -62,10 +62,14 @@
 
 ### B. Super Serial Card로 Apple II 원격 제어
 
-키보드가 고장 난 실기를 위해 만든 기능입니다. 실기를 **`A2REMOTE.DSK`** 로 부팅하면 HELLO가 `IN#2` 를 실행해 SSC(슬롯 2)가 키보드가 됩니다. 이후 모든 일은 SSC 하나로 합니다. STM32 Apple //e 에뮬레이터에서도 같은 디스크로 똑같이 동작합니다.
+키보드가 고장 난 실기를 위해 만든 기능입니다. 실기를 **`A2REMOTE.DSK`** 로 부팅하면 HELLO가 입력 드라이버 **A2KBDA** 를 띄웁니다. 이후 Apple은 **실제 키보드, SSC(슬롯 2), 카세트 입력(PC 소리)** 어디서 들어온 키든 받습니다. 디스켓 보기·덤프·진단은 SSC로 합니다. STM32 Apple //e 에뮬레이터에서도 같은 디스크로 동작합니다.
 
 #### 5. ⌨️ 원격 키보드
-* 웹 상단 `⌨️ Apple 키보드` 칸에 입력하고 Enter를 누르면 SSC로 Apple에 그대로 타이핑됩니다. 예: `CATALOG`, `RUN SHOOTING`, `10 PRINT "HI"`, `SAVE MYPROG`, `PR#6`(재부팅).
+* 웹 상단 `⌨️ Apple 키보드` 칸에 입력하고 Enter를 누르면 Apple에 그대로 타이핑됩니다. 예: `CATALOG`, `RUN SHOOTING`, `10 PRINT "HI"`, `SAVE MYPROG`, `PR#6`(재부팅).
+* **전송 경로 선택** (`전송: SSC / 🔊 오디오`):
+  * **SSC**: 시리얼 케이블로 보냅니다.
+  * **🔊 오디오**: SSC 없이 **PC 이어폰/라인 출력 → Apple 카세트 IN 단자** 오디오 케이블 하나로 보냅니다. PC가 명령을 소리 패킷으로 재생하면 A2KBDA가 카세트 입력(`$C060`)에서 풀어 키로 넘깁니다. 한 패킷에 여러 줄(최대 255자)을 담고 Apple 쪽 버퍼에 쌓으므로, 첫 줄을 실행하는 동안 뒷줄을 잃지 않습니다. 체크섬이 틀린 패킷은 삐 소리와 함께 버립니다.
+  * `🔊 WAV` 로 그 소리를 파일로 받아 휴대폰 등 다른 기기에서 재생해도 됩니다.
 * `Ctrl-C` / `RETURN` / `ESC` 버튼, `여러 줄…` 붙여넣기(BASIC 프로그램 입력), 대문자 자동 변환, 최근 입력 기록.
 * Apple 화면 결과는 돌려받지 않습니다. 결과는 디스켓 읽기로 확인합니다(예: `SAVE` 후 목록 갱신).
 
@@ -109,7 +113,9 @@
 * **화면 미반환**: Apple 화면을 웹으로 돌려받지 않습니다. `CATALOG` 가 한 화면을 넘어 키를 기다리면 `RETURN` 을 눌러 줍니다.
 * **첫 디스켓 만들기**: 키보드가 안 되면 ADTPro처럼 Apple 쪽에서 명령을 쳐야 하는 도구는 못 씁니다. Floppy Emu 같은 디스크 에뮬레이터나 PC용 플로피 기록 장치(Greaseweazle, Applesauce)로 `a2remote.dsk` 를 처음 한 번 준비해야 합니다.
 * **검사 범위**: //e 보조 64KB(80컬럼 카드)는 진단하지 않습니다. RAM 검사는 4KB 블록 단위라 블록끼리 겹치는 주소선 고장은 못 찾습니다.
-* **//c 미지원**: SSC 슬롯이 없는 //c(내장 시리얼 포트)는 시험하지 않았습니다.
+* **//c 미지원**: SSC 슬롯이 없는 //c(내장 시리얼 포트)는 시험하지 않았습니다. //c에는 카세트 단자도 없어 오디오 입력도 쓸 수 없습니다.
+* **오디오는 한 방향**: 오디오로는 키 입력(PC → Apple)만 됩니다. 디스켓 보기·덤프·진단(Apple → PC)은 SSC가 필요합니다. 오디오는 받았다는 확인이 없어서, 잘못 받은 패킷은 Apple이 삐 소리를 내고 버립니다(다시 보내세요). Apple이 명령을 실행하느라 키를 기다리지 않는 동안 온 소리는 사라집니다.
+* **오디오 검증 범위**: A2KBDA의 디코딩은 ① py65 6502 시뮬레이터(실제 WAV를 사이클 단위로, `npm run test:audio`)와 ② STM32 보드의 카세트 입력(TCP 6503, 사이클 정확 6502에서 실제 A2KBDA 실행)에서 확인했습니다. 보드에서 7패킷 1.5KB 프로그램이 한 글자도 틀리지 않았고 손상 패킷은 버려졌습니다. PC 사운드 카드 → 케이블 → 실기 카세트 회로의 **아날로그 구간은 실기에서 확인해야** 합니다.
 * **실기 미시험**: STM32 에뮬레이터에서 모두 확인했지만 실기에서는 아직 시험 전입니다. 글자가 빠지면 `remote_disk.js` 의 입력 간격(실기: 글자 2ms, 줄 400ms)을 늘리세요.
 
 ---
@@ -137,8 +143,11 @@
   (pyserial) ─ COMx      │                      │
           │              ▼                      ▼
           ▼        에뮬레이터 //e SSC      AppleWin SSC
-   실기 Apple II SSC (슬롯 2)
-          │  A2REMOTE.DSK 부팅: HELLO → IN#2 (SSC = 키보드)
+   실기 Apple II SSC (슬롯 2)        audio_keys.js ─ PC 소리 출력 ─┐
+          │                                                          ▼
+          │                                       실기 카세트 IN ($C060)
+          │  A2REMOTE.DSK 부팅: HELLO → (SSC면 IN#2) → BRUN A2KBDA
+          │  A2KBDA ($9300): 키보드 · SSC · 카세트 입력 → DOS/BASIC 키 입력
           │  A2SRV ($6000): Disk II 니블 읽기 / 메모리 덤프 / RAM 검사
           ▼
    Disk II (슬롯 6, 드라이브 1)
@@ -153,6 +162,7 @@
 * **Java (JRE/JDK 8 이상)**: AppleCommander를 통한 DSK 조작용
 * **AppleWin** (Apple //e 에뮬레이터, 선택 사항)
 * **pyserial** (실기를 COM 포트로 연결할 때만): `python -m pip install pyserial`
+* **py65** (오디오 수신 시뮬레이션 시험 `npm run test:audio` 때만): `python -m pip install py65`
 * **xa** 6502 어셈블러 (A2SRV를 고칠 때만, MSYS2 `pacman -S mingw-w64-ucrt-x86_64-xa`)
 
 ### 2. 저장소 복제 및 의존성 설치
@@ -232,7 +242,8 @@ npm run build:remote-dsk
 
 | 파일 | 역할 |
 | :--- | :--- |
-| `HELLO` | 부팅 시 실행. `PRINT CHR$(4);"IN#2"` 로 DOS 입력을 SSC(슬롯 2)로 돌림 → PC가 키보드 |
+| `HELLO` | 부팅 시 실행. `HIMEM: 37632`, 슬롯 2에 SSC가 있으면(ROM ID `$C205=$38`, `$C207=$18`) `IN#2` 로 SSC 초기화, 그다음 `BRUN A2KBDA` |
+| `A2KBDA` | `$9300` 입력 드라이버. 키보드·SSC·카세트 입력에서 키를 받아 DOS/BASIC에 넘김 (`apple2/a2kbda.s`) |
 | `A2SRV` | `$6000` 섹터 서버. 서버가 `BRUN A2SRV` 로 실행해 디스크를 읽고, 끝나면 BASIC으로 RTS |
 
 이 이미지를 실기에서 부팅할 수 있게 준비합니다. 키보드가 안 되는 기계에서는 ADTPro처럼 Apple 쪽에서 명령을 쳐야 하는 도구를 쓸 수 없으므로 다음 중 하나를 씁니다.
@@ -264,9 +275,30 @@ COM 포트 이름은 `python tools/com_relay.py --list` 로 확인합니다. 서
 
 > Node 26에서는 `serialport` 네이티브 모듈이 로드되지 않아 COM 포트를 Python(pyserial) 릴레이로 엽니다.
 
+#### ③-1 오디오로 키 보내기 (SSC 없이, 또는 SSC와 함께)
+```
+[PC 이어폰/라인 출력] ── 3.5mm 오디오 케이블 ── [Apple 카세트 IN 단자]
+```
+* Apple ][+ / //e 뒷면의 **카세트 IN**(입력) 단자에 연결합니다(OUT 아님). PC 볼륨은 **최대 근처**로, 효과음·음량 평준화 같은 소리 효과는 끕니다.
+* 웹의 `전송` 을 `🔊 오디오` 로 바꾸고 명령을 입력합니다. PC가 약 0.3초(짧은 명령) 소리를 냅니다. Windows는 Python 기본 모듈 `winsound` 로 재생하므로 추가 설치가 없습니다.
+* 소리를 다른 기기로 내려면 `🔊 WAV` 로 파일을 받거나 `GET /api/remote/audio.wav?text=CATALOG` 를 씁니다. 명령줄에서는 `node audio_keys.js play "CATALOG"` / `node audio_keys.js wav "CATALOG" out.wav` 입니다.
+* 오디오만 쓸 때는 SSC 없이 `node server.js --no-bridge` 로 띄워도 됩니다(디스켓 보기·덤프·진단은 SSC가 있어야 함).
+* **STM32 보드에서는 소리 대신 신호를 직접 보냅니다**: `--stm32` 로 실행하면 `🔊 오디오` 전송이 PC 스피커로 재생하지 않고, 같은 반주기 길이를 보드의 **카세트 입력 포트 TCP 6503** 으로 보냅니다. 보드 펌웨어가 이것을 에뮬레이트된 CPU 사이클에 맞춰 `$C060` bit 7로 바꿉니다(STM32 프로젝트 `applem-core/src/core/input/cassette_input.hpp`). 그래서 케이블 없이 A2KBDA의 오디오 수신을 보드에서 시험할 수 있습니다. 보드여도 스피커로 내려면 `--audio-pc` 를 붙입니다. 명령줄로는 `node audio_keys.js board "CATALOG"` 입니다.
+
+**오디오 패킷 형식** (사각파 반주기, A2KBDA가 14사이클 루프 횟수로 잼)
+
+| 부분 | 내용 |
+| :--- | :--- |
+| 리더 | 833µs 반주기(600Hz) 200개 (A2KBDA는 64개 이상이면 인정) |
+| 동기 | 150µs, 250µs |
+| 바이트 | 상위 비트부터. 0 = 250µs×2, 1 = 500µs×2 |
+| 구성 | `LEN`(1-255), 데이터 `LEN` 바이트(7비트 ASCII, 줄 끝 RETURN), `CHK = $A5 ^ LEN ^ 데이터` |
+
+에지 뒤 약 80µs 동안 레벨이 유지되어야 에지로 인정하므로(디바운스), 잡음으로 생기는 떨림을 걸러 냅니다. `npm run test:audio` 는 py65 6502 시뮬레이터에서 실제 WAV를 `$C060` 에 사이클 단위로 넣어 확인합니다. 여러 줄, 모든 출력 가능 문자, 3패킷, CPU 클록 ±3%, ±40µs 떨림, 반전 신호, 손상 패킷(삐 소리 후 버림) 경우를 봅니다.
+
 #### ④ 사용
-1. 실기에 A2REMOTE 디스켓을 넣고 전원을 켭니다. 화면에 `APPLE2-WEB REMOTE DISK ... KEYBOARD INPUT: SUPER SERIAL CARD SLOT 2` 가 나오고 `]` 에서 SSC 입력을 기다립니다.
-2. 브라우저 `http://localhost:3000` 의 `⌨️ Apple 키보드` 칸에 명령을 입력하고 Enter.
+1. 실기에 A2REMOTE 디스켓을 넣고 전원을 켭니다. 화면에 `APPLE2-WEB REMOTE DISK` 와 `KEYS FROM: KEYBOARD, CASSETTE IN, SSC SLOT 2` 가 나오고(SSC가 없으면 SSC 부분은 빠짐) `]` 에서 입력을 기다립니다.
+2. 브라우저 `http://localhost:3000` 의 `⌨️ Apple 키보드` 칸에 명령을 입력하고 Enter. `전송` 에서 SSC / 🔊 오디오를 고릅니다.
    * `CATALOG` 가 한 화면을 넘으면 DOS가 키를 기다리므로 **`RETURN`** 버튼을 누릅니다.
    * BASIC 프로그램 중단은 **`Ctrl-C`**. (Control-Reset은 시리얼로 보낼 수 없습니다.)
    * 여러 줄(BASIC 프로그램)은 **`여러 줄…`** 에 붙여넣기 → 한 줄씩 RETURN과 함께 입력.
@@ -359,7 +391,8 @@ A2SRV는 트랙을 먼저 `$6600-$85FF`에 모두 읽은 뒤 한꺼번에 보냅
 | `POST` | `/api/backups/create` | 수동 디스크 체크포인트 스냅샷 생성 |
 | `GET` | `/api/download/dsk` | 수정된 `apple2-web.dsk` 디스크 이미지 파일 다운로드 |
 | `GET` | `/api/remote/status` | SSC 연결(실기/STM32), A2SRV 실행 여부, 읽기 진행, 마지막 읽기 결과, 최근 입력 |
-| `POST` | `/api/remote/type` | `{ "text": "CATALOG" }` 를 SSC로 Apple에 타이핑 (줄마다 RETURN). `{ "key": "ctrl-c" \| "return" \| "esc" }` |
+| `POST` | `/api/remote/type` | `{ "text": "CATALOG" }` 를 Apple에 타이핑 (줄마다 RETURN). `{ "key": "ctrl-c" \| "return" \| "esc" }`. `"via": "audio"` 면 PC 소리로 (기본 `"ssc"`) |
+| `GET` | `/api/remote/audio.wav` | `?text=CATALOG` 의 오디오 키 입력 WAV (다른 기기에서 재생용) |
 | `POST` | `/api/remote/sync` | `BRUN A2SRV` → 드라이브 1 읽기 → `remote/drive1.dsk` 저장 → A2SRV 종료. `{ "full": true }` 면 35트랙 전체 (202, 진행은 status로) |
 | `POST` | `/api/remote/quit` | 떠 있는 A2SRV 종료 (BASIC 프롬프트로) |
 | `GET` | `/api/download/a2remote` | 실기 부팅용 `A2REMOTE.DSK` 다운로드 |
@@ -412,7 +445,8 @@ apple2-web/
 ├── apple2/
 │   ├── HELLO.BAS          # DOS 3.3 기본 부팅 환영 프로그램 소스
 │   ├── WEBCLIENT.BAS      # Apple II SSC 웹 클라이언트 & 브릿지 소스
-│   ├── REMOTE_HELLO.BAS   # A2REMOTE.DSK의 HELLO (IN#2: SSC를 키보드로)
+│   ├── REMOTE_HELLO.BAS   # A2REMOTE.DSK의 HELLO (SSC 있으면 IN#2, 그다음 BRUN A2KBDA)
+│   ├── a2kbda.s / .bin    # A2KBDA: 키보드·SSC·카세트 입력에서 키를 받는 입력 드라이버 ($9300)
 │   ├── a2srv.s            # A2SRV: Disk II 섹터·메모리 덤프·RAM 검사를 SSC로 하는 6502 서버 (xa 문법)
 │   └── a2srv.bin          # 어셈블된 A2SRV ($6000)
 ├── remote/                # (git 제외) SSC로 읽어 온 Apple 데이터
@@ -423,6 +457,7 @@ apple2-web/
 ├── tools/
 │   ├── AppleCommander.jar # AppleCommander DOS 3.3 디스크 처리 엔진
 │   ├── com_relay.py       # 실기 COM 포트 ↔ TCP 중계 (pyserial)
+│   ├── test_a2kbda.py     # A2KBDA 오디오 수신을 py65 6502 시뮬레이터로 검증 (npm run test:audio)
 │   └── dos33_template.dsk # 초기 DOS 3.3 기본 디스크 템플릿
 ├── ac_tool.py             # AppleCommander CLI 래퍼 (json, get, put, put-basic, delete)
 ├── build_dsk.py           # Applesoft BASIC 토크나이저 및 DSK 이미지 빌더
@@ -430,6 +465,7 @@ apple2-web/
 ├── a2remote.dsk           # 실기 부팅용 원격 키보드 디스크
 ├── bridge.js              # Apple II SSC <-> TCP/시리얼 브릿지 모듈
 ├── remote_disk.js         # SSC 원격 타이핑, A2SRV 실행, 4&4/6&2 디코딩, 메모리 덤프, RAM 진단 (CLI 겸용)
+├── audio_keys.js          # 오디오 키 입력: 텍스트 → 카세트 패킷 WAV, PC 소리 재생 (CLI 겸용)
 ├── server.js              # Express 서버: DOS 3.3 파일 API, 백업/롤백, 원격(/api/remote/*), 접근 제한
 ├── apple2-web.dsk         # 부팅 가능한 실시간 Apple II DOS 3.3 디스크 이미지
 ├── package.json           # Node.js 프로젝트 설정 및 의존성

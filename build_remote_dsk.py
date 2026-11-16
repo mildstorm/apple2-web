@@ -5,9 +5,11 @@ build_remote_dsk.py - Build A2REMOTE.DSK, the boot disk for a real Apple II
 whose keyboard does not work.
 
 The disk is DOS 3.3 (from tools/dos33_template.dsk) with only:
-  - HELLO  : runs at boot and gives DOS the Super Serial Card in slot 2 as
-             its input (IN#2), so the PC types for the keyboard
+  - HELLO  : runs at boot: HIMEM below A2KBDA, IN#2 if a Super Serial Card
+             is in slot 2 (its firmware sets the ACIA up), then BRUN A2KBDA
              (source: apple2/REMOTE_HELLO.BAS)
+  - A2KBDA : the input routine ($9300) - keys from the keyboard, the SSC and
+             the cassette input (sound from the PC, audio_keys.js)
   - A2SRV  : the sector server (apple2/a2srv.bin, $6000); the web server types
              BRUN A2SRV to read this disk over the SSC, and it returns to
              BASIC when done
@@ -30,6 +32,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DSK = os.path.join(SCRIPT_DIR, "tools", "dos33_template.dsk")
 HELLO_SRC = os.path.join(SCRIPT_DIR, "apple2", "REMOTE_HELLO.BAS")
 A2SRV_BIN = os.path.join(SCRIPT_DIR, "apple2", "a2srv.bin")
+A2KBDA_BIN = os.path.join(SCRIPT_DIR, "apple2", "a2kbda.bin")
 
 
 def main():
@@ -50,6 +53,9 @@ def main():
 
     with open(A2SRV_BIN, "rb") as f:
         put_file(out, "A2SRV", "B", 0x6000, f.read())
+
+    with open(A2KBDA_BIN, "rb") as f:
+        put_file(out, "A2KBDA", "B", 0x9300, f.read())
 
     print(f"[OK] {out}")
     for t, n in list_dsk_files(out):
