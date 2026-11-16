@@ -14,7 +14,7 @@ const path = require('path');
 const fs = require('fs');
 const { exec, execFile } = require('child_process');
 const SerialBridge = require('./bridge');
-const { RemoteDisk } = require('./remote_disk');
+const { RemoteDisk, crc32 } = require('./remote_disk');
 
 const HTTP_PORT = parseInt(process.env.PORT || '3000', 10);
 const DSK_PATH = path.join(__dirname, 'apple2-web.dsk');
@@ -512,7 +512,10 @@ function remoteStatus() {
     total: remoteState.total || 0,
     log: remoteState.log,
     typed: typedHistory.slice(-20),
+    job: remoteState.job || null,
     lastSync: remoteState.lastSync,
+    lastDump: remoteState.lastDump || null,
+    hasDiag: !!remoteState.diag,
     snapshot: exists ? { path: REMOTE_DSK, mtime: fs.statSync(REMOTE_DSK).mtime } : null
   };
 }
@@ -527,7 +530,7 @@ function requireRemote(res) {
     return false;
   }
   if (remoteDisk.busy || remoteState.phase === 'loading' || remoteState.phase === 'reading') {
-    res.status(409).json({ error: '지금 Apple 디스크를 읽는 중입니다. 끝난 뒤 다시 시도하세요.' });
+    res.status(409).json({ error: '지금 Apple 작업(디스크 읽기/덤프/진단)이 진행 중입니다. 끝난 뒤 다시 시도하세요.' });
     return false;
   }
   return true;
@@ -537,49 +540,34 @@ app.get('/api/remote/status', (req, res) => {
   res.json(remoteStatus());
 });
 
-// Apple에 A2SRV를 띄워(BRUN A2SRV) 드라이브 1을 읽고 remote/drive1.dsk 로 저장한 뒤,
-// A2SRV를 끝내 BASIC 프롬프트로 돌려 놓음. 기본은 VTOC에서 사용 중인 트랙만 읽음
-// ({ full: true } 이면 35트랙 전부). 202를 바로 돌려주고 진행은 /api/remote/status.
-app.post('/api/remote/sync', (req, res) => {
+// Apple 쪽 작업(디스크 읽기, 메모리 덤프, 진단)을 하나씩 돌림:
+// A2SRV 실행(BRUN A2SRV) → work() → A2SRV 종료(BASIC 프롬프트로).
+// 바로 202를 돌려주고 진행은 /api/remote/status 로 확인.
+function runRemoteJob(res, job, startMsg, work) {
   if (!requireRemote(res)) return;
-  const full = !!(req.body && req.body.full);
-
+  remoteState.job = job;
   remoteState.phase = 'loading';
   remoteState.done = 0;
   remoteState.total = 0;
   remoteState.log = [];
   remoteLog('A2SRV 시작 중...');
-  res.status(202).json({ success: true, message: 'Apple 드라이브 1 읽기를 시작했습니다.' });
+  res.status(202).json({ success: true, message: startMsg });
 
   (async () => {
     try {
       await remoteDisk.load(remoteLog);
       remoteState.phase = 'reading';
-      remoteLog(full ? '드라이브 1 전체(35트랙) 읽는 중...' : '드라이브 1 읽는 중 (VTOC의 사용 트랙만)...');
-      const r = await remoteDisk.readDisk({
-        full,
-        onProgress: (p) => {
-          remoteState.done = p.done || 0;
-          remoteState.total = p.total || 0;
-        }
+      const msg = await work((done, total) => {
+        remoteState.done = done;
+        remoteState.total = total;
       });
       try {
         await remoteDisk.quit();
       } catch (e) {
         remoteLog(`A2SRV 종료 응답 없음: ${e.message}`);
       }
-      fs.mkdirSync(REMOTE_DIR, { recursive: true });
-      fs.writeFileSync(REMOTE_DSK, r.image);
-      remoteState.lastSync = {
-        at: new Date().toISOString(),
-        ms: r.ms,
-        volume: r.volume,
-        dos: r.dos,
-        tracksRead: 35 - r.skipped.length,
-        unreadable: r.unreadable
-      };
       remoteState.phase = 'done';
-      remoteLog(`완료: ${35 - r.skipped.length}트랙, ${(r.ms / 1000).toFixed(1)}초, 읽지 못한 섹터 ${r.unreadable.length}개`);
+      remoteLog(msg);
     } catch (e) {
       remoteState.phase = 'error';
       remoteLog(`오류: ${e.message}`);
@@ -589,6 +577,120 @@ app.post('/api/remote/sync', (req, res) => {
       }
     }
   })();
+}
+
+// 드라이브 1을 읽어 remote/drive1.dsk 로 저장. 기본은 VTOC에서 사용 중인 트랙만
+// ({ full: true } 이면 35트랙 전부).
+app.post('/api/remote/sync', (req, res) => {
+  const full = !!(req.body && req.body.full);
+  runRemoteJob(res, 'sync', 'Apple 드라이브 1 읽기를 시작했습니다.', async (progress) => {
+    remoteLog(full ? '드라이브 1 전체(35트랙) 읽는 중...' : '드라이브 1 읽는 중 (VTOC의 사용 트랙만)...');
+    const r = await remoteDisk.readDisk({ full, onProgress: (p) => progress(p.done || 0, p.total || 0) });
+    fs.mkdirSync(REMOTE_DIR, { recursive: true });
+    fs.writeFileSync(REMOTE_DSK, r.image);
+    remoteState.lastSync = {
+      at: new Date().toISOString(),
+      ms: r.ms,
+      volume: r.volume,
+      dos: r.dos,
+      tracksRead: 35 - r.skipped.length,
+      unreadable: r.unreadable
+    };
+    return `완료: ${35 - r.skipped.length}트랙, ${(r.ms / 1000).toFixed(1)}초, 읽지 못한 섹터 ${r.unreadable.length}개`;
+  });
+});
+
+// ---- 메모리 덤프: Apple 메모리의 한 구간을 PC 파일로 (remote/dumps/*.bin) ----
+const DUMP_DIR = path.join(REMOTE_DIR, 'dumps');
+const MAP_LABEL = {
+  normal: '현재 매핑',
+  rom: 'ROM ($D000-$FFFF는 ROM)',
+  lc1: 'Language Card RAM bank 1',
+  lc2: 'Language Card RAM bank 2',
+  intcx: '//e 내부 $C100-$CFFF ROM'
+};
+
+function parseAddr(v) {
+  const s = String(v == null ? '' : v).trim().replace(/^\$|^0x/i, '');
+  if (!/^[0-9a-f]{1,4}$/i.test(s)) return NaN;
+  return parseInt(s, 16);
+}
+
+const hex4s = (n) => n.toString(16).toUpperCase().padStart(4, '0');
+
+// body: { start: "D000", end: "FFFF", map: "rom", name?: "IIE_ROM" }  (end 포함)
+app.post('/api/remote/memdump', (req, res) => {
+  const b = req.body || {};
+  const start = parseAddr(b.start);
+  const end = parseAddr(b.end);
+  const map = String(b.map || 'normal');
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
+    return res.status(400).json({ error: '시작/끝 주소를 16진수로 입력하세요 (예: D000, FFFF).' });
+  }
+  if (!MAP_LABEL[map]) return res.status(400).json({ error: `알 수 없는 메모리 맵: ${map}` });
+  const name = String(b.name || '').toUpperCase().replace(/[^A-Z0-9_\-]/g, '').slice(0, 32);
+  const len = end - start + 1;
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '_');
+  const file = `${name ? name + '_' : ''}${hex4s(start)}-${hex4s(end)}_${map}_${stamp}.bin`;
+
+  runRemoteJob(res, 'memdump', `$${hex4s(start)}-$${hex4s(end)} 덤프를 시작했습니다.`, async (progress) => {
+    remoteLog(`메모리 $${hex4s(start)}-$${hex4s(end)} (${len}바이트, ${MAP_LABEL[map]}) 읽는 중...`);
+    const data = await remoteDisk.readMemory(start, len, map, (p) => progress(p.done, p.total));
+    fs.mkdirSync(DUMP_DIR, { recursive: true });
+    fs.writeFileSync(path.join(DUMP_DIR, file), data);
+    remoteState.lastDump = { file, start, end, map, size: len, crc32: crc32(data).toString(16).toUpperCase().padStart(8, '0') };
+    return `덤프 완료: ${file} (${len}바이트, CRC32 ${remoteState.lastDump.crc32})`;
+  });
+});
+
+app.get('/api/remote/dumps', (req, res) => {
+  if (!fs.existsSync(DUMP_DIR)) return res.json({ dumps: [] });
+  const dumps = fs.readdirSync(DUMP_DIR).filter((f) => f.endsWith('.bin')).map((f) => {
+    const st = fs.statSync(path.join(DUMP_DIR, f));
+    const m = f.match(/([0-9A-F]{4})-([0-9A-F]{4})_([a-z0-9]+)_/);
+    return { file: f, size: st.size, mtime: st.mtime, start: m ? m[1] : null, end: m ? m[2] : null, map: m ? m[3] : null };
+  }).sort((a, b) => b.mtime - a.mtime);
+  res.json({ dumps });
+});
+
+app.get('/api/remote/dumps/:file', (req, res) => {
+  const file = path.basename(req.params.file);
+  const p = path.join(DUMP_DIR, file);
+  if (!file.endsWith('.bin') || !fs.existsSync(p)) return res.status(404).json({ error: '덤프 파일이 없습니다.' });
+  if (req.query.format === 'hex') {
+    return res.json({ file, size: fs.statSync(p).size, hex: fs.readFileSync(p).toString('hex') });
+  }
+  res.download(p, file);
+});
+
+// ---- 진단: 기종 확인, 주 메모리/Language Card RAM 검사, ROM CRC32 ----
+// body: { lc: true, rom: true }   RAM 내용은 검사 후 그대로 복원됨
+app.post('/api/remote/diag', (req, res) => {
+  const opts = { lc: !(req.body && req.body.lc === false), rom: !(req.body && req.body.rom === false) };
+  runRemoteJob(res, 'diag', '메모리 진단을 시작했습니다.', async (progress) => {
+    let step = 0;
+    const report = await remoteDisk.diagnostics(opts, (msg) => {
+      step++;
+      progress(step, 0);
+      remoteState.message = msg;
+    });
+    if (report.romImage) {
+      fs.mkdirSync(DUMP_DIR, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '_');
+      report.rom.file = `DIAG_ROM_D000-FFFF_rom_${stamp}.bin`;
+      fs.writeFileSync(path.join(DUMP_DIR, report.rom.file), report.romImage);
+      delete report.romImage;
+    }
+    remoteState.diag = report;
+    const parts = [`기종: ${report.machine.name}`, `주 메모리 ${report.main.ok ? 'OK' : '오류 ' + report.main.errors + '개'}`];
+    if (report.lc) parts.push(report.lc.present ? `LC ${report.lc.bank1.ok && report.lc.bank2.ok ? 'OK' : '오류'}` : 'LC 없음');
+    if (report.rom) parts.push(`ROM CRC32 ${report.rom.crc32}`);
+    return `진단 완료: ${parts.join(', ')}`;
+  });
+});
+
+app.get('/api/remote/diag', (req, res) => {
+  res.json({ report: remoteState.diag || null });
 });
 
 // 웹에서 입력한 명령을 SSC로 Apple 키보드처럼 입력 (화면 결과는 돌려받지 않음)

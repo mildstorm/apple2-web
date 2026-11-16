@@ -575,6 +575,7 @@
     </select>
     <button class="btn" id="remote-sync-btn" onclick="syncRemoteDisk()" title="Apple에서 BRUN A2SRV를 실행해 드라이브 1을 읽고 파일 목록을 갱신합니다">📡 Apple에서 읽기</button>
     <label title="체크하지 않으면 VTOC에서 사용 중인 트랙만 읽습니다 (실기 9600bps에서 훨씬 빠름)"><input type="checkbox" id="remote-full"> 35트랙 전체</label>
+    <button class="btn btn-secondary" onclick="openMemModal()" title="Apple 메모리/ROM 덤프와 RAM 진단">🧪 메모리/진단</button>
     <button class="btn btn-secondary" id="remote-quit-btn" onclick="quitRemoteServer()" title="A2SRV를 끝내고 BASIC 프롬프트로 돌아갑니다">⏏ A2SRV 종료</button>
     <span><span class="dot" id="ssc-dot"></span><span id="ssc-label">SSC 확인 중...</span></span>
     <div class="remote-progress" id="remote-progress"><div></div></div>
@@ -765,6 +766,66 @@
       </div>
       <div class="modal-footer" style="padding: 10px 16px; display: flex; justify-content: flex-end; border-top: 1px solid var(--border); background: #0b120b;">
         <button class="btn btn-secondary" onclick="closeSnapshotModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Apple 메모리 덤프 & 진단 -->
+  <div id="mem-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 860px; width: 95vw;">
+      <div class="modal-header">
+        <span>🧪 Apple II 메모리 덤프 &amp; 진단 (SSC)</span>
+        <button class="btn btn-secondary" style="padding: 2px 8px;" onclick="closeMemModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto; font-size: 12px;">
+        <div style="color: var(--text-dim); margin-bottom: 8px;">
+          Apple이 <code>]</code> 프롬프트에서 SSC 입력을 기다리는 상태여야 합니다. 서버가 A2SRV를 띄워 작업한 뒤 BASIC으로 돌려 놓습니다.
+          진행 상황: <span id="mem-job-msg" style="color: var(--amber);">-</span>
+        </div>
+
+        <h4 style="color: var(--green); margin: 10px 0 6px;">① 메모리 / ROM 덤프 → PC 파일</h4>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <label>시작 $<input id="mem-start" class="input-text" value="D000" style="width:70px; padding:3px 6px;"></label>
+          <label>끝 $<input id="mem-end" class="input-text" value="FFFF" style="width:70px; padding:3px 6px;"></label>
+          <select id="mem-map" class="input-text" style="padding:3px 6px; width:auto;">
+            <option value="rom">ROM ($D000-$FFFF는 ROM)</option>
+            <option value="normal">현재 매핑 그대로</option>
+            <option value="lc2">Language Card RAM bank 2</option>
+            <option value="lc1">Language Card RAM bank 1</option>
+            <option value="intcx">//e 내부 $C100-$CFFF ROM</option>
+          </select>
+          <label>이름 <input id="mem-name" class="input-text" placeholder="예: MY_ROM" style="width:110px; padding:3px 6px;"></label>
+          <button class="btn" onclick="startMemDump()">⬇ 덤프</button>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+          <span style="color: var(--text-dim);">빠른 선택:</span>
+          <button class="btn btn-secondary" style="padding:2px 8px; font-size:11px;" onclick="memPreset('D000','FFFF','rom','ROM')">ROM $D000-$FFFF</button>
+          <button class="btn btn-secondary" style="padding:2px 8px; font-size:11px;" onclick="memPreset('F800','FFFF','rom','MONITOR')">모니터 ROM $F800-$FFFF</button>
+          <button class="btn btn-secondary" style="padding:2px 8px; font-size:11px;" onclick="memPreset('C100','CFFF','intcx','CXROM')">//e CX ROM</button>
+          <button class="btn btn-secondary" style="padding:2px 8px; font-size:11px;" onclick="memPreset('C600','C6FF','normal','SLOT6')">슬롯 6 ROM $C600</button>
+          <button class="btn btn-secondary" style="padding:2px 8px; font-size:11px;" onclick="memPreset('0000','BFFF','normal','RAM48K')">RAM $0000-$BFFF</button>
+        </div>
+        <div style="color: var(--text-dim); margin-top:4px;">$C000-$C0FF(I/O 소프트 스위치)는 읽으면 장치가 동작하므로 $00으로 채워집니다. 실기 9600bps에서 12KB ≈ 15초.</div>
+
+        <table style="width:100%; margin-top:8px; border-collapse:collapse;">
+          <thead><tr style="color: var(--text-dim); text-align:left;"><th>덤프 파일</th><th>범위</th><th>맵</th><th style="text-align:right;">크기</th><th></th></tr></thead>
+          <tbody id="mem-dump-list"><tr><td colspan="5" style="color:var(--text-dim);">-</td></tr></tbody>
+        </table>
+
+        <h4 style="color: var(--green); margin: 16px 0 6px;">② 메모리 진단 (Diagnostics)</h4>
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+          <label><input type="checkbox" id="diag-lc" checked> Language Card RAM ($D000-$FFFF)</label>
+          <label><input type="checkbox" id="diag-rom" checked> ROM CRC32</label>
+          <button class="btn" onclick="startDiag()">▶ 진단 실행</button>
+        </div>
+        <div style="color: var(--text-dim); margin-top:4px;">
+          주 메모리 $0200-$BFFF와 LC RAM을 4KB씩 백업 → 주소마다 다른 4가지 패턴 쓰기/확인 → 복원합니다 (내용 보존). 고정 비트와 블록 안 주소선 고장을 찾습니다.
+          $0000-$01FF(제로페이지/스택), $6000-$64FF(A2SRV 코드), //e 보조 메모리(80컬럼)는 검사하지 않습니다.
+        </div>
+        <div id="diag-result" style="margin-top:10px;"></div>
+      </div>
+      <div class="modal-footer" style="padding: 10px 16px; display: flex; justify-content: flex-end; border-top: 1px solid var(--border); background: #0b120b;">
+        <button class="btn btn-secondary" onclick="closeMemModal()">닫기</button>
       </div>
     </div>
   </div>
@@ -1767,6 +1828,161 @@
         alert('통신 오류: ' + e.message);
       }
       pollRemoteStatus();
+    }
+
+    // =========================================================
+    // 메모리 덤프 & 진단 (A2SRV 'M' / 'R')
+    // =========================================================
+    const memModal = document.getElementById('mem-modal');
+    const memJobMsg = document.getElementById('mem-job-msg');
+    let memJobTimer = null;
+
+    function openMemModal() {
+      memModal.style.display = 'flex';
+      loadDumpList();
+      loadDiagReport();
+    }
+    function closeMemModal() { memModal.style.display = 'none'; }
+
+    function memPreset(s, e, map, name) {
+      document.getElementById('mem-start').value = s;
+      document.getElementById('mem-end').value = e;
+      document.getElementById('mem-map').value = map;
+      document.getElementById('mem-name').value = name;
+    }
+
+    // 서버 작업이 끝날 때까지 상태를 보여 주고 끝나면 onDone(status)
+    function watchJob(job, onDone) {
+      clearInterval(memJobTimer);
+      memJobTimer = setInterval(async () => {
+        const s = await pollRemoteStatus();
+        if (!s) return;
+        memJobMsg.textContent = s.message || s.phase;
+        memJobMsg.style.color = s.phase === 'error' ? 'var(--red)' : 'var(--amber)';
+        if (s.busy) return;
+        clearInterval(memJobTimer);
+        if (s.job === job) onDone(s);
+      }, 700);
+    }
+
+    async function postJob(url, body) {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json();
+      if (!res.ok) { alert(d.error); return false; }
+      memJobMsg.textContent = d.message;
+      return true;
+    }
+
+    async function startMemDump() {
+      const body = {
+        start: document.getElementById('mem-start').value,
+        end: document.getElementById('mem-end').value,
+        map: document.getElementById('mem-map').value,
+        name: document.getElementById('mem-name').value
+      };
+      if (!(await postJob('/api/remote/memdump', body))) return;
+      watchJob('memdump', (s) => {
+        if (s.phase === 'done') showToast('⬇ ' + s.message);
+        loadDumpList();
+      });
+    }
+
+    async function loadDumpList() {
+      const tb = document.getElementById('mem-dump-list');
+      try {
+        const { dumps } = await fetch('/api/remote/dumps').then((r) => r.json());
+        if (!dumps.length) { tb.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim);">아직 덤프가 없습니다.</td></tr>'; return; }
+        tb.innerHTML = '';
+        dumps.slice(0, 30).forEach((d) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-family:monospace; color:#a3d9a3; padding:3px 4px;">${escapeHtml(d.file)}</td>
+            <td>${d.start ? '$' + d.start + '-$' + d.end : ''}</td>
+            <td>${escapeHtml(d.map || '')}</td>
+            <td style="text-align:right;">${d.size.toLocaleString()}</td>
+            <td style="text-align:right; white-space:nowrap;">
+              <button class="btn btn-secondary" style="padding:1px 6px; font-size:11px;">보기</button>
+              <a class="btn btn-secondary" style="padding:1px 6px; font-size:11px;" href="/api/remote/dumps/${encodeURIComponent(d.file)}">💾</a>
+            </td>`;
+          tr.querySelector('button').addEventListener('click', () => viewDump(d));
+          tb.appendChild(tr);
+        });
+      } catch (e) {
+        tb.innerHTML = `<tr><td colspan="5" style="color:var(--red);">${escapeHtml(e.message)}</td></tr>`;
+      }
+    }
+
+    // 덤프를 Hex Editor / 6502 Disassembler로 (시작 주소를 디스어셈블 기준 주소로)
+    async function viewDump(d) {
+      const data = await fetch(`/api/remote/dumps/${encodeURIComponent(d.file)}?format=hex`).then((r) => r.json());
+      if (!data.hex) { alert(data.error || '덤프를 읽을 수 없습니다.'); return; }
+      closeMemModal();
+      currentFileType = 'B';
+      targetFilename.value = (d.file.split('_')[0] || 'DUMP').slice(0, 30);
+      editorTitle.textContent = `🧪 메모리 덤프: ${d.file}`;
+      editorTypeTag.className = 'tag tag-b';
+      editorTypeTag.textContent = '[B] Memory Dump';
+      binViewTabs.style.display = 'flex';
+      basicEditor.style.display = 'none';
+      currentRawBytes = [];
+      for (let i = 0; i < data.hex.length; i += 2) currentRawBytes.push(parseInt(data.hex.substr(i, 2), 16));
+      modifiedIndices.clear();
+      selectedByteIndex = 0;
+      hexPageIndex = 0;
+      disasmPageIndex = 0;
+      if (d.start) {
+        disasmBaseAddr = parseInt(d.start, 16);
+        disasmBaseAddrInput.value = '$' + d.start;
+      }
+      editorSizeInfo.textContent = `크기: ${currentRawBytes.length.toLocaleString()} 바이트, 시작 $${d.start || '0000'}`;
+      setBinViewMode('disasm');
+      renderHexPage();
+      updateDisassembly();
+      showToast(`'${d.file}' 덤프를 열었습니다 (Hex / 6502 Disassembly)`);
+    }
+
+    async function startDiag() {
+      const body = { lc: document.getElementById('diag-lc').checked, rom: document.getElementById('diag-rom').checked };
+      document.getElementById('diag-result').innerHTML = '<span style="color:var(--amber);">진단 중... (실기 9600bps에서 약 1분)</span>';
+      if (!(await postJob('/api/remote/diag', body))) return;
+      watchJob('diag', () => { loadDiagReport(); loadDumpList(); });
+    }
+
+    function ramBlockHtml(title, r) {
+      if (!r) return '';
+      const head = r.ok
+        ? `<span style="color:var(--green);">✔ 정상</span>`
+        : `<span style="color:var(--red);">✘ 오류 ${r.errors.toLocaleString()}개</span>`;
+      let html = `<div style="margin:6px 0;"><b>${escapeHtml(title)}</b> ${escapeHtml(r.label)} — ${(r.bytesTested / 1024).toFixed(1)}KB 검사, ${head}`;
+      if (!r.ok) {
+        const bits = r.badBits.map((b) => `D${b.bit}(${b.count})`).join(', ');
+        const banks = Object.entries(r.badBanks).map(([k, v]) => `${k}: ${v}`).join(', ');
+        html += `<div style="color:var(--amber); margin-left:12px;">불량 데이터 비트: ${bits || '-'} · 16KB 뱅크별: ${banks || '-'}</div>`;
+        html += `<div style="margin-left:12px; font-family:monospace;">` + r.faults.slice(0, 12).map((f) =>
+          `${f.addr}: 기대 ${f.expected} 읽음 ${f.actual} (비트 ${f.bits.join(',')})`).join('<br>') + '</div>';
+      }
+      return html + '</div>';
+    }
+
+    async function loadDiagReport() {
+      const box = document.getElementById('diag-result');
+      const { report } = await fetch('/api/remote/diag').then((r) => r.json());
+      if (!report) { box.innerHTML = '<span style="color:var(--text-dim);">아직 진단 결과가 없습니다.</span>'; return; }
+      let html = `<div style="color:var(--text-dim);">${new Date(report.at).toLocaleString()}</div>`;
+      html += `<div style="margin:6px 0;"><b>기종</b> ${escapeHtml(report.machine.name)} <span style="color:var(--text-dim);">(ID $FBB3=${report.machine.id.FBB3}, $FBC0=${report.machine.id.FBC0}, $FB1E=${report.machine.id.FB1E})</span></div>`;
+      html += ramBlockHtml('주 메모리', report.main);
+      if (report.lc) {
+        if (!report.lc.present) html += `<div style="margin:6px 0;"><b>Language Card</b> <span style="color:var(--amber);">${escapeHtml(report.lc.note)}</span></div>`;
+        else html += ramBlockHtml('LC bank 2', report.lc.bank2) + ramBlockHtml('LC bank 1', report.lc.bank1);
+      }
+      if (report.rom) {
+        html += `<div style="margin:6px 0;"><b>ROM $D000-$FFFF</b> CRC32 <code>${report.rom.crc32}</code>`;
+        if (report.rom.file) html += ` · <a href="/api/remote/dumps/${encodeURIComponent(report.rom.file)}" style="color:var(--cyan);">덤프 파일</a>`;
+        html += `<div style="margin-left:12px; font-family:monospace;">2KB 단위(II/II+ ROM 칩): ${report.rom.chips2k.map((c) => `${c.range}=${c.crc32}`).join(' · ')}</div>`;
+        html += `<div style="margin-left:12px; font-family:monospace;">//e (CD/EF 칩): ${report.rom.halves8k.map((c) => `${c.range}=${c.crc32}`).join(' · ')}</div>`;
+        html += `<div style="margin-left:12px; color:var(--text-dim);">정상 ROM 덤프의 CRC32와 비교하면 ROM 칩 불량을 찾을 수 있습니다.</div></div>`;
+      }
+      box.innerHTML = html;
     }
 
     // 초기 실행

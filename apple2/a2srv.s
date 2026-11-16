@@ -19,16 +19,19 @@
 ; there before it quits, so DOS finds the drive as it left it.
 ;
 ; Protocol (PC -> Apple - $AA sync byte, command, argument)
-;   $AA 'P'          ping            -> "A2SV1"
+;   $AA 'P'          ping            -> "A2SV2" (the digit is the version)
 ;   $AA 'T' track    read one track  -> 'S' + 8 address nibbles + 343 data
 ;                                       nibbles, once per sector found (up
 ;                                       to 16), then 'E' + sectors missing
 ;                                       ('X' + missing on a timeout, e.g.
 ;                                       no disk; 'X' $FF on a bad track)
 ;   $AA 'Q'          quit            -> 'Q', head back, RTS
+;   $AA 'M' addr(2) len(2) flags     memory to the PC -> 'M' + bytes + sum(2)
+;   $AA 'R' page count flags         RAM test of 1-16 pages, contents kept
+;                                    -> 'F' lo hi expected actual ..., 'D' errors(2)
 ;
 ; Build - xa -o a2srv.bin a2srv.s      (loads and runs at $6000)
-; Memory - code $6000-$63FF, track buffer $6600-$85FF,
+; Memory - code $6000-$64FF, track buffer / RAM test save area $6600-$85FF,
 ;          zero page $06-$09 $CE $CF $EB $FA-$FF
 ; ==============================================================================
 
@@ -113,7 +116,13 @@ GOTB    lda ACDATA
         beq DOTRK
         cmp #$51        ; 'Q'
         beq DOQUIT
-        jmp CMDLP
+        cmp #$4D        ; 'M'
+        bne NOTM
+        jmp DOMEM
+NOTM    cmp #$52        ; 'R'
+        bne NOTR
+        jmp DORAM
+NOTR    jmp CMDLP
 
 DOPING  jsr HELLO
         jmp CMDLP
@@ -386,6 +395,244 @@ MOTORF  ldx #SLOT
         sta MOTOR
         rts
 
+; ---- memory map for M and R -------------------------------------------------
+; MFLAGS bit 0  ROM at $D000-$FFFF       ($C082)
+;        bit 1  LC RAM bank 1, read+write ($C08B twice)
+;        bit 2  LC RAM bank 2, read+write ($C083 twice)
+;        bit 3  //e internal $C100-$CFFF ROM (INTCXROM, put back after)
+;        bit 7  R only - the block is scratch, no save/restore
+; After bits 0-2 the map is left as ROM read, write protected ($C082), the
+; state DOS 3.3 with Applesoft in ROM runs in.
+MAPIN   lda MFLAGS
+        lsr
+        bcc MI1
+        bit $C082
+MI1     lsr
+        bcc MI2
+        bit $C08B
+        bit $C08B
+MI2     lsr
+        bcc MI3
+        bit $C083
+        bit $C083
+MI3     lsr
+        bcc MI4
+        lda $C015       ; //e - bit 7 set while INTCXROM is on
+        sta OLDCX
+        sta $C007
+MI4     rts
+
+MAPOUT  lda MFLAGS
+        and #$07
+        beq MO1
+        bit $C082
+MO1     lda MFLAGS
+        and #$08
+        beq MO2
+        lda OLDCX
+        bmi MO2
+        sta $C006
+MO2     rts
+
+; ---- M - memory to the PC -----------------------------------------------------
+; $AA 'M' addrlo addrhi lenlo lenhi flags -> 'M', len bytes, sum lo, sum hi
+; (16-bit sum of the bytes). $C000-$C0FF is never read - reading a soft switch
+; can start the disk motor or take a byte from the SSC - and goes as $00.
+DOMEM   jsr GETB
+        sta PTRL
+        jsr GETB
+        sta PTRH
+        jsr GETB
+        sta CNTL
+        jsr GETB
+        sta CNTH
+        jsr GETB
+        sta MFLAGS
+        jsr MAPIN
+        lda #$4D        ; 'M'
+        jsr PUTB
+        lda #0
+        sta SUML
+        sta SUMH
+        ldy #0
+MLOOP   lda PTRH
+        cmp #$C0
+        bne MRD
+        lda #0
+        beq MPUT
+MRD     lda (PTRL),y
+MPUT    pha
+        clc
+        adc SUML
+        sta SUML
+        bcc MS1
+        inc SUMH
+MS1     pla
+        jsr PUTB
+        inc PTRL
+        bne MS2
+        inc PTRH
+MS2     lda CNTL
+        bne MS3
+        dec CNTH
+MS3     dec CNTL
+        lda CNTL
+        ora CNTH
+        bne MLOOP
+        jsr MAPOUT
+        lda SUML
+        jsr PUTB
+        lda SUMH
+        jsr PUTB
+        jmp CMDLP
+
+; ---- R - RAM test of one block ------------------------------------------------
+; $AA 'R' page count(1-16) flags -> 'F' lo hi expected actual (first 32
+; errors), then 'D' errors lo, errors hi.
+; The block is copied to SAVEBUF, then filled and checked four times with
+; lo ^ page ^ K (K = $00 $FF $55 $AA) - every bit is 0 and 1 at each address,
+; and any two addresses in the block differ, so stuck bits and address faults
+; inside the block show - and then copied back. Interrupts are off and no
+; ROM is called meanwhile, so DOS, the screen and a BASIC program survive.
+SAVEPG  = $66           ; SAVEBUF $6600-$75FF (the track buffer)
+CURP    = $FA           ; page being worked on
+PATK    = $FB           ; pattern constant
+SAVP    = $FF           ; page in SAVEBUF
+DSTL    = $FD
+DSTH    = $FE
+
+DORAM   jsr GETB
+        sta RPAGE
+        jsr GETB
+        sta RCNT
+        jsr GETB
+        sta MFLAGS
+        jsr MAPIN
+        lda #0
+        sta ERRL
+        sta ERRH
+        bit MFLAGS
+        bmi RNOSAV
+        lda #0
+        jsr BCOPY       ; block -> SAVEBUF
+RNOSAV  ldx #3
+RPAT    lda PATS,x
+        sta PATK
+        stx CURS
+        jsr RFILL
+        jsr RVERIFY
+        ldx CURS
+        dex
+        bpl RPAT
+        bit MFLAGS
+        bmi RNOREST
+        lda #1
+        jsr BCOPY       ; SAVEBUF -> block
+RNOREST jsr MAPOUT
+        lda #$44        ; 'D'
+        jsr PUTB
+        lda ERRL
+        jsr PUTB
+        lda ERRH
+        jsr PUTB
+        jmp CMDLP
+
+; A = 0 - block to SAVEBUF, 1 - SAVEBUF to block
+BCOPY   sta CNTL
+        lda #0
+        sta PTRL
+        sta DSTL
+        lda RCNT
+        sta CNTH
+        lda RPAGE
+        sta CURP
+        lda #SAVEPG
+        sta SAVP
+BCP1    lda CNTL
+        bne BCP2
+        lda CURP
+        sta PTRH
+        lda SAVP
+        sta DSTH
+        jmp BCP3
+BCP2    lda SAVP
+        sta PTRH
+        lda CURP
+        sta DSTH
+BCP3    ldy #0
+BCP4    lda (PTRL),y
+        sta (DSTL),y
+        iny
+        bne BCP4
+        inc CURP
+        inc SAVP
+        dec CNTH
+        bne BCP1
+        rts
+
+RFILL   lda #0
+        sta PTRL
+        lda RPAGE
+        sta CURP
+        lda RCNT
+        sta CNTH
+RF1     lda CURP
+        sta PTRH
+        ldy #0
+RF2     tya
+        eor CURP
+        eor PATK
+        sta (PTRL),y
+        iny
+        bne RF2
+        inc CURP
+        dec CNTH
+        bne RF1
+        rts
+
+RVERIFY lda #0
+        sta PTRL
+        lda RPAGE
+        sta CURP
+        lda RCNT
+        sta CNTH
+RV1     lda CURP
+        sta PTRH
+        ldy #0
+RV2     tya
+        eor CURP
+        eor PATK
+        cmp (PTRL),y
+        bne RBAD
+RV3     iny
+        bne RV2
+        inc CURP
+        dec CNTH
+        bne RV1
+        rts
+RBAD    sta CNTL        ; expected
+        inc ERRL
+        bne RB1
+        inc ERRH
+RB1     lda ERRH
+        bne RV3
+        lda ERRL
+        cmp #33
+        bcs RV3
+        lda #$46        ; 'F'
+        jsr PUTB
+        tya
+        jsr PUTB
+        lda CURP
+        jsr PUTB
+        lda CNTL
+        jsr PUTB
+        lda (PTRL),y
+        jsr PUTB
+        jmp RV3
+
+PATS    .byt $00,$FF,$55,$AA
+
 ; ---- SSC --------------------------------------------------------------------
 GETB    lda ACSTAT
         and #$08
@@ -449,11 +696,19 @@ SS3     lda ACSTAT
         bne SS3
         rts
 
-HELLOS  .asc "A2SV1"
+HELLOS  .asc "A2SV2"     ; 2 - with M and R
         .byt 0
 RECAL   .byt 0
 RETRY   .byt 0
 HOMEHT  .byt 0
 OLDCMD  .byt 0
+MFLAGS  .byt 0
+OLDCX   .byt 0
+SUML    .byt 0
+SUMH    .byt 0
+RPAGE   .byt 0
+RCNT    .byt 0
+ERRL    .byt 0
+ERRH    .byt 0
 ADDR    .dsb 8,0
 DONE    .dsb 16,0

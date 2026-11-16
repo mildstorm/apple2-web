@@ -29,7 +29,8 @@ const LOAD_ADDR = 0x6000;
 const BIN_PATH = path.join(__dirname, 'apple2', 'a2srv.bin');
 const TRACKS = 35;
 const SECTORS = 16;
-const HELLO = Buffer.from('A2SV1', 'ascii');
+const HELLO = Buffer.from('A2SV', 'ascii');   // followed by the version digit
+const A2SRV_VERSION = 2;                       // 2: memory dump (M) and RAM test (R)
 
 // ---- GCR tables -------------------------------------------------------------
 
@@ -230,9 +231,14 @@ class RemoteDisk extends EventEmitter {
     });
   }
 
+  /** Wait for "A2SV<n>"; this.version = n. */
   _waitHello(timeoutMs) {
-    return this._waitFor(() => (this.rx.indexOf(HELLO) >= 0 ? true : undefined), timeoutMs)
-      .then(() => true, () => false);
+    return this._waitFor(() => {
+      const i = this.rx.indexOf(HELLO);
+      if (i < 0 || this.rx.length < i + HELLO.length + 1) return undefined;
+      this.version = this.rx[i + HELLO.length] - 0x30;
+      return true;
+    }, timeoutMs).then(() => true, () => false);
   }
 
   /**
@@ -307,22 +313,32 @@ class RemoteDisk extends EventEmitter {
    */
   async load(log = () => {}) {
     if (this.serverRunning !== false && await this.ping()) {
-      log('A2SRV가 이미 실행 중입니다.');
-      return { alreadyRunning: true };
+      if (this.version >= A2SRV_VERSION) {
+        log(`A2SRV가 이미 실행 중입니다 (v${this.version}).`);
+        return { alreadyRunning: true };
+      }
+      log(`실행 중인 A2SRV가 구버전(v${this.version})이라 종료하고 새로 올립니다.`);
+      await this.quit();
     }
 
-    log('BRUN A2SRV 입력 (SSC)');
-    this.rx = Buffer.alloc(0);
-    await this.type('BRUN A2SRV');
-    if (await this._waitHello(this.baud ? 15000 : 8000)) {
-      this.serverRunning = true;
-      this.returnTo = 'basic';
-      log('A2SRV 실행 확인 (A2SV1).');
-      return { alreadyRunning: false, how: 'brun' };
+    {
+      log('BRUN A2SRV 입력 (SSC)');
+      this.rx = Buffer.alloc(0);
+      await this.type('BRUN A2SRV');
+      if (await this._waitHello(this.baud ? 15000 : 8000)) {
+        this.serverRunning = true;
+        this.returnTo = 'basic';
+        if (this.version >= A2SRV_VERSION) {
+          log(`A2SRV 실행 확인 (v${this.version}).`);
+          return { alreadyRunning: false, how: 'brun' };
+        }
+        log(`디스크의 A2SRV가 구버전(v${this.version})입니다 - 종료하고 새 버전을 SSC로 보냅니다. (build_remote_dsk.py로 디스크를 다시 만들면 빨라집니다)`);
+        await this.quit();
+      }
     }
 
     const { bin, lines } = this._hexLines();
-    log(`디스크에 A2SRV가 없어 모니터로 ${bin.length}바이트를 SSC로 전송합니다.`);
+    log(`모니터로 A2SRV ${bin.length}바이트를 SSC로 전송합니다.`);
     this._send([0x18]);
     await this.type('CALL-151');
     this.rx = Buffer.alloc(0);
@@ -331,7 +347,7 @@ class RemoteDisk extends EventEmitter {
     if (await this._waitHello(8000)) {
       this.serverRunning = true;
       this.returnTo = 'monitor-from-basic';
-      log('A2SRV 실행 확인 (A2SV1).');
+      log(`A2SRV 실행 확인 (v${this.version}).`);
       return { alreadyRunning: false, how: 'monitor' };
     }
 
@@ -365,11 +381,11 @@ class RemoteDisk extends EventEmitter {
     this.rx = Buffer.alloc(0);
     this.bridge.send(Buffer.from('\r' + lines.join('\r') + '\r' + `${LOAD_ADDR.toString(16).toUpperCase()}G\r`, 'ascii'));
     if (!(await this._waitHello(8000))) {
-      throw new Error('A2SRV가 시작 신호(A2SV1)를 보내지 않았습니다.');
+      throw new Error('A2SRV가 시작 신호(A2SV)를 보내지 않았습니다.');
     }
     this.serverRunning = true;
     this.returnTo = 'monitor';
-    log('A2SRV 실행 확인 (A2SV1).');
+    log(`A2SRV 실행 확인 (v${this.version}).`);
     return { alreadyRunning: false, how: 'board', bytes: bin.length };
   }
 
@@ -506,6 +522,220 @@ class RemoteDisk extends EventEmitter {
   }
 }
 
+// ---- memory: dump and RAM test (A2SRV 'M' and 'R') ------------------------------
+
+// MFLAGS for A2SRV's M/R commands
+const MAP = { normal: 0x00, rom: 0x01, lc1: 0x02, lc2: 0x04, intcx: 0x08 };
+const SCRATCH = 0x80;
+
+Object.assign(RemoteDisk.prototype, {
+  /** addr..addr+len-1 from the Apple's memory, in pieces, sum-checked. */
+  async readMemory(addr, len, map = 'normal', onProgress = () => {}) {
+    const flags = MAP[map];
+    if (flags === undefined) throw new Error(`알 수 없는 메모리 맵: ${map}`);
+    if (addr < 0 || len < 1 || addr + len > 0x10000) throw new Error('주소 범위가 $0000-$FFFF를 벗어납니다.');
+    const piece = this.baud ? 1024 : 4096;
+    const out = Buffer.alloc(len);
+    for (let off = 0; off < len; off += piece) {
+      const n = Math.min(piece, len - off);
+      const a = addr + off;
+      let data = null;
+      for (let attempt = 0; attempt < 3 && !data; attempt++) {
+        try {
+          data = await this._readMemoryOnce(a, n, flags);
+        } catch (e) {
+          if (attempt === 2) throw e;
+          if (!(await this.ping(1500))) throw e;
+        }
+      }
+      data.copy(out, off);
+      onProgress({ done: off + n, total: len });
+    }
+    return out;
+  },
+
+  async _readMemoryOnce(addr, len, flags) {
+    this.rx = Buffer.alloc(0);
+    this._send([0xAA, 0x4D, addr & 0xFF, addr >> 8, len & 0xFF, len >> 8, flags]);
+    const timeout = this.baud ? Math.ceil(len * 10 * 1000 / this.baud * 1.5) + 4000 : 6000;
+    const buf = await this._waitFor(() => {
+      const start = this.rx.indexOf(0x4D);
+      if (start < 0 || this.rx.length < start + 1 + len + 2) return undefined;
+      return this.rx.subarray(start + 1, start + 1 + len + 2);
+    }, timeout);
+    const data = Buffer.from(buf.subarray(0, len));
+    let sum = 0;
+    for (const b of data) sum = (sum + b) & 0xFFFF;
+    const got = buf[len] | (buf[len + 1] << 8);
+    if (sum !== got) throw new Error(`메모리 $${hex4(addr)} 체크섬 불일치`);
+    return data;
+  },
+
+  /** One RAM test block (1-16 pages). -> { errors: n, faults: [{addr, expected, actual}] } */
+  async ramTestBlock(page, count, flags) {
+    this.rx = Buffer.alloc(0);
+    this._send([0xAA, 0x52, page, count, flags]);
+    let pos = 0;
+    const faults = [];
+    return this._waitFor(() => {
+      for (;;) {
+        if (pos >= this.rx.length) return undefined;
+        const tag = this.rx[pos];
+        if (tag === 0x46) { // 'F'
+          if (this.rx.length - pos < 5) return undefined;
+          const r = this.rx;
+          faults.push({ addr: r[pos + 1] | (r[pos + 2] << 8), expected: r[pos + 3], actual: r[pos + 4] });
+          pos += 5;
+        } else if (tag === 0x44) { // 'D'
+          if (this.rx.length - pos < 3) return undefined;
+          return { errors: this.rx[pos + 1] | (this.rx[pos + 2] << 8), faults };
+        } else {
+          pos++;
+        }
+      }
+    }, this.baud ? 20000 : 8000);
+  },
+
+  /**
+   * Test pages first..last (inclusive) in blocks of up to 16 pages.
+   * Pages $00-$01 (zero page, stack), A2SRV's code ($60-$64) and $C0-$CF
+   * (I/O) are left out; $66-$75 is A2SRV's own save area and is tested
+   * without saving it.
+   */
+  async ramTestRange(first, last, map, onBlock = () => {}) {
+    const flags = MAP[map] || 0;
+    const skip = (p) => p < 2 || (p >= 0x60 && p <= 0x64) || (p >= 0xC0 && p <= 0xCF);
+    const scratch = (p) => p >= 0x66 && p <= 0x75;
+    const blocks = [];
+    let p = first;
+    while (p <= last) {
+      if (skip(p)) { p++; continue; }
+      const kind = scratch(p);
+      let n = 0;
+      while (p + n <= last && n < 16 && !skip(p + n) && scratch(p + n) === kind) n++;
+      blocks.push({ page: p, count: n, scratch: kind });
+      p += n;
+    }
+    const result = { tested: 0, errors: 0, faults: [] };
+    for (const b of blocks) {
+      const r = await this.ramTestBlock(b.page, b.count, flags | (b.scratch ? SCRATCH : 0));
+      result.tested += b.count * 256;
+      result.errors += r.errors;
+      for (const f of r.faults) if (result.faults.length < 200) result.faults.push(f);
+      onBlock({ page: b.page, count: b.count, errors: r.errors });
+    }
+    return result;
+  },
+
+  /**
+   * Machine type, main RAM test, language card RAM test, ROM checksums.
+   * opts: { lc: true, rom: true }. Contents of RAM are kept.
+   */
+  async diagnostics(opts = {}, onStep = () => {}) {
+    const report = { at: new Date().toISOString() };
+    onStep('기종 확인 (ROM ID 바이트)');
+    const idPage = await this.readMemory(0xFB00, 0x100, 'rom');
+    report.machine = identifyMachine(idPage);
+
+    onStep('주 메모리 RAM 검사 $0200-$BFFF');
+    const main = await this.ramTestRange(0x02, 0xBF, 'normal', (b) => onStep(`주 메모리 $${hex2(b.page)}00 - ${b.errors ? b.errors + '개 오류' : 'OK'}`));
+    report.main = summarizeRam(main, '$0200-$BFFF (페이지 $00-$01, $6000-$64FF 제외)');
+
+    if (opts.lc !== false) {
+      onStep('Language Card RAM 확인');
+      const probe = await this.ramTestBlock(0xD0, 1, MAP.lc2);
+      if (probe.errors > 256) {
+        report.lc = { present: false, note: 'Language Card RAM이 응답하지 않습니다 (없거나 고장). $D000 한 페이지 검사에서 오류 ' + probe.errors + '개' };
+      } else {
+        const b2 = await this.ramTestRange(0xD0, 0xFF, 'lc2', (b) => onStep(`LC bank 2 $${hex2(b.page)}00 - ${b.errors ? b.errors + '개 오류' : 'OK'}`));
+        const b1 = await this.ramTestRange(0xD0, 0xDF, 'lc1', (b) => onStep(`LC bank 1 $${hex2(b.page)}00 - ${b.errors ? b.errors + '개 오류' : 'OK'}`));
+        report.lc = {
+          present: true,
+          bank2: summarizeRam(b2, '$D000-$FFFF (bank 2 + 공통)'),
+          bank1: summarizeRam(b1, '$D000-$DFFF (bank 1)')
+        };
+      }
+    }
+
+    if (opts.rom !== false) {
+      onStep('ROM $D000-$FFFF 읽는 중');
+      const rom = await this.readMemory(0xD000, 0x3000, 'rom');
+      report.romImage = rom;
+      report.rom = {
+        crc32: hex8(crc32(rom)),
+        chips2k: [0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8].map((pg) => {
+          const off = (pg - 0xD0) * 256;
+          return { range: `$${hex2(pg)}00-$${hex2(pg + 7)}FF`, crc32: hex8(crc32(rom.subarray(off, off + 0x800))) };
+        }),
+        halves8k: [
+          { range: '$D000-$DFFF', crc32: hex8(crc32(rom.subarray(0, 0x1000))) },
+          { range: '$E000-$FFFF', crc32: hex8(crc32(rom.subarray(0x1000))) }
+        ]
+      };
+    }
+    return report;
+  }
+});
+
+function hex2(n) { return n.toString(16).toUpperCase().padStart(2, '0'); }
+function hex4(n) { return n.toString(16).toUpperCase().padStart(4, '0'); }
+function hex8(n) { return (n >>> 0).toString(16).toUpperCase().padStart(8, '0'); }
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(buf) {
+  let c = 0xFFFFFFFF;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+/** The model from the monitor ROM's ID bytes ($FB00 page: $FBB3, $FBC0, $FB1E). */
+function identifyMachine(page) {
+  const b3 = page[0xB3];
+  const c0 = page[0xC0];
+  const n1e = page[0x1E];
+  let name = '알 수 없음';
+  if (b3 === 0x38) name = 'Apple ][ (원형)';
+  else if (b3 === 0xEA && n1e === 0xAD) name = 'Apple ][+';
+  else if (b3 === 0xEA && n1e === 0x8A) name = 'Apple /// (에뮬레이션 모드)';
+  else if (b3 === 0x06 && c0 === 0xEA) name = 'Apple //e';
+  else if (b3 === 0x06 && c0 === 0xE0) name = 'Apple //e Enhanced (또는 IIgs)';
+  else if (b3 === 0x06 && c0 === 0x00) name = 'Apple //c';
+  return { name, id: { FBB3: hex2(b3), FBC0: hex2(c0), FB1E: hex2(n1e) } };
+}
+
+/** Errors by data bit and by 16K bank, so a bad chip can be found. */
+function summarizeRam(r, label) {
+  const bits = new Array(8).fill(0);
+  const banks = {};
+  for (const f of r.faults) {
+    const diff = f.expected ^ f.actual;
+    for (let b = 0; b < 8; b++) if (diff & (1 << b)) bits[b]++;
+    const bank = `$${hex4(f.addr & 0xC000)}-$${hex4((f.addr & 0xC000) + 0x3FFF)}`;
+    banks[bank] = (banks[bank] || 0) + 1;
+  }
+  return {
+    label,
+    bytesTested: r.tested,
+    errors: r.errors,
+    ok: r.errors === 0,
+    badBits: bits.map((n, b) => ({ bit: b, count: n })).filter((x) => x.count > 0),
+    badBanks: banks,
+    faults: r.faults.slice(0, 40).map((f) => ({
+      addr: `$${hex4(f.addr)}`, expected: `$${hex2(f.expected)}`, actual: `$${hex2(f.actual)}`,
+      bits: [0, 1, 2, 3, 4, 5, 6, 7].filter((b) => (f.expected ^ f.actual) & (1 << b))
+    }))
+  };
+}
+
 /**
  * Tracks with any sector in use, from a DOS 3.3 VTOC (track 17 sector 0), or
  * null when it does not look like one. Bitmap: 4 bytes a track from $38,
@@ -526,7 +756,7 @@ function usedTracks(vtoc) {
   return used.sort((a, b) => a - b);
 }
 
-module.exports = { RemoteDisk, decode62, decodeAddress, usedTracks, NIB62, DOS_TO_PHYS, PHYS_TO_DOS, boardCli };
+module.exports = { RemoteDisk, decode62, decodeAddress, usedTracks, crc32, identifyMachine, MAP, NIB62, DOS_TO_PHYS, PHYS_TO_DOS, boardCli };
 
 // ---- command line ---------------------------------------------------------------
 
@@ -556,7 +786,7 @@ if (require.main === module) {
     try {
       await sleep(300);
       if (cmd === 'ping') {
-        log((await rd.ping()) ? '응답 있음 (A2SV1)' : '응답 없음');
+        log((await rd.ping()) ? `응답 있음 (A2SV v${rd.version})` : '응답 없음');
       } else if (cmd === 'load') {
         await rd.load(log);
       } else if (cmd === 'quit') {
