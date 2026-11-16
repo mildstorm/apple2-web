@@ -133,6 +133,10 @@ npm install
 서버가 기동되면 웹 브라우저에서 아래 주소로 접속합니다:
 👉 **http://localhost:3000**
 
+> 🔒 **보안**: 이 서버에는 로그인이 없고, 웹 키보드는 Apple에 무엇이든 입력할 수 있습니다 (`INIT`, `DELETE` 등). 그래서 기본으로 **이 PC(127.0.0.1)에서만** 열립니다.
+> * 다른 기기(같은 집 네트워크, Tailscale 등)에서 접속하려면 `--listen 0.0.0.0` (또는 `--listen <그 인터페이스 주소>`)을 명시하세요. 이때는 신뢰하는 네트워크에서만 쓰고, PC가 공유기 없이 공인 IP를 직접 받는 환경이면 Windows 방화벽에서 Node.js의 **공용(Public)** 수신 허용을 꺼 두세요.
+> * Host 헤더가 localhost가 아닌 요청(DNS rebinding)과, 다른 웹사이트에서 보낸 POST/DELETE(CSRF)는 거절합니다.
+
 ### 4. 키보드 없는 실기를 웹으로 쓰기 (요약)
 1. `npm run build:remote-dsk` 로 만든 `a2remote.dsk` 를 디스켓에 기록해 실기에 넣고 부팅 → SSC가 키보드가 됩니다.
 2. `node server.js --serial COMx --baud 9600` 실행 후 브라우저 접속.

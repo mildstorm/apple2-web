@@ -21,6 +21,7 @@ class SerialBridge extends EventEmitter {
     this.tcpHost = options.tcpHost || '127.0.0.1';
     this.tcpPort = options.tcpPort || 1977;
     this.localAddress = options.localAddress || null;
+    this.listenHost = options.listenHost || null; // tcp-server mode; default 127.0.0.1
     this.serialPortName = options.serialPort || null;
     this.baudRate = options.baudRate || 9600;
     this.reconnectInterval = options.reconnectInterval || 2000;
@@ -156,8 +157,11 @@ class SerialBridge extends EventEmitter {
       });
     });
 
-    this.server.listen(this.tcpPort, () => {
-      console.log(`[Bridge] TCP Server listening on port ${this.tcpPort}...`);
+    // Anything that reaches this port types on the Apple: this PC only unless
+    // a listen address is given.
+    const listenHost = this.listenHost || '127.0.0.1';
+    this.server.listen(this.tcpPort, listenHost, () => {
+      console.log(`[Bridge] TCP Server listening on ${listenHost}:${this.tcpPort}...`);
     });
   }
 

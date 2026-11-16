@@ -265,6 +265,39 @@ function lintApplesoftBasic(code) {
 const app = express();
 const server = http.createServer(app);
 
+// ---- 접근 제한 ------------------------------------------------------------
+// 이 서버에는 로그인이 없고, 웹 키보드는 Apple에 무엇이든 입력할 수 있다
+// (INIT/DELETE로 디스켓 삭제 등). 그래서:
+//  1. 기본으로 이 PC(127.0.0.1)에서만 연다. 다른 기기에서 쓰려면
+//     --listen 0.0.0.0 (또는 특정 주소)을 명시해야 한다.
+//  2. Host 헤더가 localhost/127.0.0.1/[::1] 이 아니면 거절 (DNS rebinding:
+//     공격자 도메인을 127.0.0.1로 풀어 브라우저가 이 서버에 붙는 것 차단).
+//  3. 다른 사이트에서 온 POST/DELETE(Origin 헤더가 이 서버가 아님)는 거절
+//     (CSRF: 열어 둔 악성 웹페이지가 숨은 폼으로 명령을 보내는 것 차단).
+const LISTEN_HOST = argOf('--listen', process.env.LISTEN_HOST || '127.0.0.1');
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const listenIsLoopback = LOOPBACK_HOSTS.has(LISTEN_HOST);
+
+function hostOnly(h) {
+  const s = String(h || '').toLowerCase();
+  if (s.startsWith('[')) return s.slice(0, s.indexOf(']') + 1);
+  return s.split(':')[0];
+}
+
+app.use((req, res, next) => {
+  if (listenIsLoopback && !LOOPBACK_HOSTS.has(hostOnly(req.headers.host))) {
+    return res.status(403).send('Forbidden host');
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin) {
+    let originHost = null;
+    try { originHost = new URL(req.headers.origin).host.toLowerCase(); } catch (e) {}
+    if (originHost !== String(req.headers.host || '').toLowerCase()) {
+      return res.status(403).json({ error: '다른 사이트에서 온 요청은 받지 않습니다.' });
+    }
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -809,11 +842,20 @@ app.post('/api/upload/stm32', (req, res) => {
   });
 });
 
+// 잘못된 요청(깨진 JSON 등)에 스택 트레이스·PC 경로를 내보내지 않음
+app.use((err, req, res, next) => {
+  console.error(`[HTTP] ${req.method} ${req.url}: ${err.message}`);
+  res.status(err.status || err.statusCode || 500).json({ error: err.expose ? err.message : '요청을 처리할 수 없습니다.' });
+});
+
 // 서버 구동
-server.listen(HTTP_PORT, () => {
+server.listen(HTTP_PORT, LISTEN_HOST, () => {
   console.log('===============================================================');
   console.log(` Apple II DOS 3.3 Disk File Manager`);
   console.log(` Web Server: http://localhost:${HTTP_PORT}`);
+  console.log(listenIsLoopback
+    ? ' 접근: 이 PC에서만 (127.0.0.1). 다른 기기에서 쓰려면 --listen 0.0.0.0'
+    : ` ⚠ 접근: ${LISTEN_HOST} 에서 열림 - 로그인이 없으니 신뢰하는 네트워크에서만 쓰세요.`);
   console.log(` Target DSK: ${DSK_PATH}`);
   console.log('===============================================================');
 });

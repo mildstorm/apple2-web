@@ -65,7 +65,7 @@ mockServer = net.createServer((sock) => {
   });
 });
 
-mockServer.listen(1977, () => {
+mockServer.listen(1977, '127.0.0.1', () => {
   console.log('[Mock AppleWin] Port 1977 listening. Spawning server.js...');
   serverProc = spawn('node', ['server.js'], { stdio: 'inherit' });
 
