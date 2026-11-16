@@ -114,10 +114,12 @@ def list_dsk_files(dsk_path, custom_ac=None):
     if res.returncode != 0:
         raise RuntimeError(f"DSK 파일 목록 조회 실패 ({dsk_path}): {res.stderr}")
 
+    # "* B 003 GUN SOUND.OBJ " - a DOS 3.3 name runs to the end of the line and
+    # may hold spaces or control characters (e.g. "I\x01NIT"), so take all of it.
     files = []
     for line in res.stdout.splitlines():
-        m = re.match(r'^\s*[*]?\s*([A-Z])\s+\d+\s+([A-Za-z0-9_\-\.]+)', line)
-        if m:
+        m = re.match(r'^\s*[*]?\s*([A-Z])\s+\d+\s+(.*?)\s*$', line)
+        if m and m.group(2):
             files.append((m.group(1), m.group(2)))
     return files
 

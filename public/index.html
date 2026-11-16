@@ -67,6 +67,45 @@
 
     .header-actions { display: flex; gap: 10px; }
 
+    /* 디스크 소스 바 (로컬 DSK / STM32 드라이브 1 via SSC) */
+    .source-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 28px;
+      background: #0b120b;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .source-bar select {
+      background: #101810;
+      color: var(--green);
+      border: 1px solid var(--green-dim);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    .source-bar .btn { padding: 4px 10px; font-size: 12px; }
+    .source-bar .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim); margin-right: 4px;
+    }
+    .source-bar .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
+    .source-bar .dot.busy { background: var(--amber); }
+    .source-bar .dot.err { background: var(--red); }
+    .remote-progress {
+      width: 140px; height: 8px; background: #142214; border: 1px solid var(--border);
+      border-radius: 4px; overflow: hidden; display: none;
+    }
+    .remote-progress > div { height: 100%; width: 0; background: var(--green); transition: width 0.3s; }
+    #remote-msg { color: var(--text-dim); }
+    .keyboard-bar { border-top: none; }
+    .keyboard-bar #remote-cmd { flex: 1; min-width: 220px; padding: 5px 8px; font-size: 13px; text-transform: none; }
+    .source-bar input[type=checkbox] { vertical-align: middle; }
+    body.read-only .write-only { display: none !important; }
+
     .btn {
       background: #152415;
       color: var(--green);
@@ -520,12 +559,52 @@
     </div>
 
     <div class="header-actions">
-      <button class="btn" onclick="startNewBasicFile()">+ 새 BASIC 파일</button>
-      <button class="btn btn-secondary" onclick="openSnapshotModal()">🛡️ 스냅샷 &amp; 복원</button>
-      <a href="/api/download/dsk" class="btn btn-secondary">💾 DSK 다운로드</a>
+      <button class="btn write-only" onclick="startNewBasicFile()">+ 새 BASIC 파일</button>
+      <button class="btn btn-secondary write-only" onclick="openSnapshotModal()">🛡️ 스냅샷 &amp; 복원</button>
+      <a href="/api/download/dsk" id="download-link" class="btn btn-secondary">💾 DSK 다운로드</a>
       <button class="btn btn-secondary" onclick="loadFiles()">↻ 목록 새로고침</button>
     </div>
   </header>
+
+  <!-- 디스크 소스: 로컬 이미지 또는 Apple(실기/에뮬레이터) 드라이브 1 (SSC로 읽음) -->
+  <div class="source-bar">
+    <label for="disk-source">💽 디스크:</label>
+    <select id="disk-source" onchange="setDiskSource(this.value)">
+      <option value="local">로컬 apple2-web.dsk (편집 가능)</option>
+      <option value="remote">Apple II 드라이브 1 (SSC로 읽은 사본, 읽기 전용)</option>
+    </select>
+    <button class="btn" id="remote-sync-btn" onclick="syncRemoteDisk()" title="Apple에서 BRUN A2SRV를 실행해 드라이브 1을 읽고 파일 목록을 갱신합니다">📡 Apple에서 읽기</button>
+    <label title="체크하지 않으면 VTOC에서 사용 중인 트랙만 읽습니다 (실기 9600bps에서 훨씬 빠름)"><input type="checkbox" id="remote-full"> 35트랙 전체</label>
+    <button class="btn btn-secondary" id="remote-quit-btn" onclick="quitRemoteServer()" title="A2SRV를 끝내고 BASIC 프롬프트로 돌아갑니다">⏏ A2SRV 종료</button>
+    <span><span class="dot" id="ssc-dot"></span><span id="ssc-label">SSC 확인 중...</span></span>
+    <div class="remote-progress" id="remote-progress"><div></div></div>
+    <span id="remote-msg"></span>
+  </div>
+
+  <!-- 원격 키보드: 웹에서 입력한 명령을 SSC로 Apple에 타이핑 -->
+  <div class="source-bar keyboard-bar">
+    <label for="remote-cmd">⌨️ Apple 키보드:</label>
+    <input type="text" id="remote-cmd" class="input-text" list="remote-cmd-history"
+           placeholder="예: CATALOG  /  RUN SHOOTING  /  10 PRINT &quot;HI&quot;  (Enter로 전송)"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();sendRemoteCommand();}">
+    <datalist id="remote-cmd-history"></datalist>
+    <button class="btn" onclick="sendRemoteCommand()">⏎ 실행</button>
+    <button class="btn btn-secondary" onclick="sendRemoteKey('ctrl-c')" title="BASIC 프로그램 중단">Ctrl-C</button>
+    <button class="btn btn-secondary" onclick="sendRemoteKey('return')">RETURN</button>
+    <button class="btn btn-secondary" onclick="sendRemoteKey('esc')">ESC</button>
+    <label title="DOS 3.3 명령은 대문자여야 합니다"><input type="checkbox" id="remote-upper" checked> 대문자</label>
+    <button class="btn btn-secondary" onclick="toggleMultiline()">여러 줄…</button>
+    <a href="/api/download/a2remote" class="btn btn-secondary" title="실기에 넣어 부팅하는 디스크: 부팅하면 SSC가 키보드가 됩니다">💾 A2REMOTE.DSK</a>
+    <span id="remote-type-msg" style="color: var(--text-dim);"></span>
+    <div id="multiline-box" style="display:none; width:100%;">
+      <textarea id="remote-multi" class="input-text" rows="6" style="width:100%; min-height:110px;"
+                placeholder="여러 줄을 한 줄씩 RETURN과 함께 입력합니다 (예: BASIC 프로그램 붙여넣기)"></textarea>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button class="btn" onclick="sendRemoteMultiline()">⏎ 모두 입력</button>
+        <span style="color: var(--text-dim);">입력 후 SAVE 이름 으로 디스크에 저장하고 [📡 Apple에서 읽기]로 목록을 확인하세요.</span>
+      </div>
+    </div>
+  </div>
 
   <!-- 메인 2단 레이아웃 -->
   <main>
@@ -650,7 +729,7 @@
         <span style="font-size: 12px; color: var(--text-dim);" id="save-hint">
           Hex 바이트를 클릭하고 키보드로 16진수(0-9, A-F)를 타이핑하면 즉시 수정됩니다.
         </span>
-        <button class="btn" onclick="saveCurrentFile()">💾 디스크에 저장</button>
+        <button class="btn write-only" onclick="saveCurrentFile()">💾 디스크에 저장</button>
       </div>
     </div>
   </main>
@@ -794,8 +873,18 @@
     // 파일 목록 조회
     async function loadFiles() {
       try {
-        const res = await fetch('/api/files');
+        const res = await fetch(`/api/files?${diskQS()}`);
         const data = await res.json();
+        if (data.error) {
+          fileCount.textContent = 0;
+          fileTable.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--amber); padding:24px;">${escapeHtml(data.error)}</td></tr>`;
+          return;
+        }
+        if (!data.files || data.files.length === 0) {
+          fileCount.textContent = 0;
+          fileTable.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-dim); padding:24px;">DOS 3.3 카탈로그에 파일이 없습니다${currentDisk === 'remote' ? ' (DOS 3.3 디스크가 아니거나 빈 디스크일 수 있습니다)' : ''}.</td></tr>`;
+          return;
+        }
         if (data.files && data.files.length > 0) {
           fileCount.textContent = data.files.length;
           fileTable.innerHTML = '';
@@ -807,13 +896,19 @@
             if (f.type === 'B') tagClass = 'tag-b';
             else if (f.type === 'I') tagClass = 'tag-i';
 
+            // Names can hold spaces or control characters (e.g. U4's "I^ANIT"),
+            // so they are shown visibly and passed to handlers as data, not
+            // spliced into onclick strings.
+            const shown = f.name.replace(/[\x00-\x1f]/g, (c) => '^' + String.fromCharCode(c.charCodeAt(0) + 64));
             tr.innerHTML = `
-              <td><span class="tag ${tagClass}">[${f.type}]</span></td>
-              <td style="font-weight: bold; color: #d6ffd6; font-size: 14px;" onclick="openFile('${escapeHtml(f.name)}', '${f.type}')">${escapeHtml(f.name)}</td>
+              <td><span class="tag ${tagClass}">[${escapeHtml(f.type)}]</span></td>
+              <td class="file-name" style="font-weight: bold; color: #d6ffd6; font-size: 14px;">${escapeHtml(shown)}</td>
               <td style="text-align: right;">
-                <button class="btn btn-danger" style="padding: 2px 7px; font-size: 11px;" onclick="deleteFile('${escapeHtml(f.name)}')">삭제</button>
+                <button class="btn btn-danger write-only" style="padding: 2px 7px; font-size: 11px;">삭제</button>
               </td>
             `;
+            tr.querySelector('.file-name').addEventListener('click', () => openFile(f.name, f.type));
+            tr.querySelector('.btn-danger').addEventListener('click', () => deleteFile(f.name));
             fileTable.appendChild(tr);
           });
         }
@@ -842,7 +937,7 @@
         setBinViewMode('hex');
 
         try {
-          const res = await fetch(`/api/files/${encodeURIComponent(filename)}?type=B`);
+          const res = await fetch(`/api/files/${encodeURIComponent(filename)}?type=B&${diskQS()}`);
           const data = await res.json();
           if (data.hex) {
             // Hex 문자열을 바이트 배열로 변환
@@ -873,7 +968,7 @@
         saveHint.textContent = 'BASIC 코드를 수정한 뒤 [디스크에 저장]을 누르세요.';
 
         try {
-          const res = await fetch(`/api/files/${encodeURIComponent(filename)}`);
+          const res = await fetch(`/api/files/${encodeURIComponent(filename)}?${diskQS()}`);
           const data = await res.json();
           basicEditor.value = data.content || '';
           editorSizeInfo.textContent = `텍스트 모드`;
@@ -1507,9 +1602,179 @@
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    // =========================================================
+    // 디스크 소스: 로컬 DSK / STM32 에뮬레이터 드라이브 1 (SSC)
+    // =========================================================
+    let currentDisk = 'local';
+    let remotePollTimer = null;
+    const diskSourceSel = document.getElementById('disk-source');
+    const remoteSyncBtn = document.getElementById('remote-sync-btn');
+    const remoteQuitBtn = document.getElementById('remote-quit-btn');
+    const sscDot = document.getElementById('ssc-dot');
+    const sscLabel = document.getElementById('ssc-label');
+    const remoteProgress = document.getElementById('remote-progress');
+    const remoteMsg = document.getElementById('remote-msg');
+
+    function diskQS() {
+      return `disk=${encodeURIComponent(currentDisk)}`;
+    }
+
+    function setDiskSource(src) {
+      currentDisk = (src === 'remote' || src === 'stm32') ? 'remote' : 'local';
+      diskSourceSel.value = currentDisk;
+      try { localStorage.setItem('a2web.disk', currentDisk); } catch (e) {}
+      document.body.classList.toggle('read-only', currentDisk === 'remote');
+      document.getElementById('download-link').href = `/api/download/dsk?${diskQS()}`;
+      document.querySelector('.subtitle').textContent = currentDisk === 'remote'
+        ? '디스크: Apple II 드라이브 1 (SSC로 읽은 사본, 읽기 전용)'
+        : '디스크 이미지: apple2-web.dsk • BASIC 소스 & 바이너리 실시간 편집기';
+      startNewBasicFile();
+      loadFiles();
+    }
+
+    function renderRemoteStatus(s) {
+      const busy = s.busy;
+      const linkName = s.link === 'serial' ? '실기' : s.link === 'stm32' ? 'STM32' : 'SSC';
+      sscDot.className = 'dot ' + (s.phase === 'error' ? 'err' : busy ? 'busy' : s.sscConnected ? 'on' : '');
+      sscLabel.textContent = !s.available ? 'SSC 브릿지 꺼짐'
+        : s.sscConnected ? `${linkName} ${s.target}${s.serverRunning ? ' · A2SRV 실행 중' : ''}`
+        : `${linkName} ${s.target} 연결 안 됨`;
+      remoteSyncBtn.disabled = busy || !s.sscConnected;
+      remoteQuitBtn.style.display = s.serverRunning && !busy ? '' : 'none';
+      remoteProgress.style.display = busy ? 'block' : 'none';
+      remoteProgress.firstElementChild.style.width = `${s.total ? Math.round(100 * s.done / s.total) : 3}%`;
+      let msg = s.message || '';
+      if (s.phase === 'reading' && s.total) msg = `트랙 ${s.done}/${s.total} 읽는 중...`;
+      else if (!busy && s.snapshot && s.phase !== 'error') {
+        msg = `마지막 읽기: ${new Date(s.snapshot.mtime).toLocaleString()}`;
+        if (s.lastSync) {
+          msg += ` · ${s.lastSync.tracksRead}트랙`;
+          if (s.lastSync.unreadable && s.lastSync.unreadable.length) msg += ` · 읽지 못한 섹터 ${s.lastSync.unreadable.length}개`;
+        }
+      }
+      remoteMsg.textContent = msg;
+      remoteMsg.style.color = s.phase === 'error' ? 'var(--red)' : '';
+      const hist = document.getElementById('remote-cmd-history');
+      if (s.typed) {
+        const uniq = [...new Set(s.typed.map((t) => t.text).filter((t) => t && !t.startsWith('<')).reverse())];
+        hist.innerHTML = uniq.map((t) => `<option value="${escapeHtml(t).replace(/"/g, '&quot;')}">`).join('');
+      }
+    }
+
+    // ---- 원격 키보드 (웹 → SSC → Apple) ----
+    const remoteCmd = document.getElementById('remote-cmd');
+    const remoteTypeMsg = document.getElementById('remote-type-msg');
+
+    async function postType(payload, label) {
+      remoteTypeMsg.textContent = `보내는 중: ${label}`;
+      try {
+        const res = await fetch('/api/remote/type', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const d = await res.json();
+        if (!res.ok) {
+          remoteTypeMsg.textContent = '';
+          alert('입력 실패: ' + d.error);
+          return false;
+        }
+        remoteTypeMsg.textContent = `✔ ${new Date().toLocaleTimeString()} ${label}`;
+        pollRemoteStatus();
+        return true;
+      } catch (e) {
+        remoteTypeMsg.textContent = '';
+        alert('통신 오류: ' + e.message);
+        return false;
+      }
+    }
+
+    function prepText(t) {
+      return document.getElementById('remote-upper').checked ? t.toUpperCase() : t;
+    }
+
+    async function sendRemoteCommand() {
+      const text = prepText(remoteCmd.value);
+      if (await postType({ text, enter: true }, text || '(RETURN)')) remoteCmd.value = '';
+      remoteCmd.focus();
+    }
+
+    function sendRemoteKey(key) {
+      postType({ key }, key.toUpperCase());
+    }
+
+    function toggleMultiline() {
+      const box = document.getElementById('multiline-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function sendRemoteMultiline() {
+      const ta = document.getElementById('remote-multi');
+      const text = prepText(ta.value.replace(/\r\n/g, '\n').replace(/\n+$/, ''));
+      if (!text) return;
+      const n = text.split('\n').length;
+      if (await postType({ text, enter: true }, `${n}줄`)) ta.value = '';
+    }
+
+    async function pollRemoteStatus() {
+      try {
+        const res = await fetch('/api/remote/status');
+        const s = await res.json();
+        renderRemoteStatus(s);
+        return s;
+      } catch (e) {
+        sscLabel.textContent = '서버 응답 없음';
+        return null;
+      }
+    }
+
+    async function syncRemoteDisk() {
+      try {
+        const res = await fetch('/api/remote/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ full: document.getElementById('remote-full').checked })
+        });
+        const d = await res.json();
+        if (!res.ok) {
+          alert('Apple 디스크 읽기 실패: ' + d.error);
+          return;
+        }
+        showToast('📡 Apple 드라이브 1을 SSC로 읽는 중...');
+        clearInterval(remotePollTimer);
+        remotePollTimer = setInterval(async () => {
+          const s = await pollRemoteStatus();
+          if (!s || s.busy) return;
+          clearInterval(remotePollTimer);
+          if (s.phase === 'done') {
+            showToast('✅ Apple 드라이브 1 읽기 완료');
+            setDiskSource('remote');
+          } else if (s.phase === 'error') {
+            alert(s.message);
+          }
+        }, 700);
+      } catch (e) {
+        alert('통신 오류: ' + e.message);
+      }
+    }
+
+    async function quitRemoteServer() {
+      try {
+        const res = await fetch('/api/remote/quit', { method: 'POST' });
+        const d = await res.json();
+        showToast(d.success ? d.message : '종료 실패: ' + d.error);
+      } catch (e) {
+        alert('통신 오류: ' + e.message);
+      }
+      pollRemoteStatus();
+    }
+
     // 초기 실행
-    loadFiles();
-    startNewBasicFile();
+    let savedDisk = 'local';
+    try { savedDisk = localStorage.getItem('a2web.disk') || 'local'; } catch (e) {}
+    setDiskSource(savedDisk);
+    pollRemoteStatus();
+    setInterval(pollRemoteStatus, 5000);
   </script>
 </body>
 </html>

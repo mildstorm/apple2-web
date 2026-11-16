@@ -12,11 +12,16 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const SerialBridge = require('./bridge');
+const { RemoteDisk } = require('./remote_disk');
 
 const HTTP_PORT = parseInt(process.env.PORT || '3000', 10);
 const DSK_PATH = path.join(__dirname, 'apple2-web.dsk');
+// The disk in the Apple's drive 1 (real or emulated), as last read over the
+// SSC (read-only here).
+const REMOTE_DIR = path.join(__dirname, 'remote');
+const REMOTE_DSK = path.join(REMOTE_DIR, 'drive1.dsk');
 const BACKUP_DIR = path.join(__dirname, 'backups');
 const AC_TOOL = path.join(__dirname, 'ac_tool.py');
 
@@ -52,18 +57,97 @@ if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
 
-// Optional SSC Serial Bridge for AppleWin / Real Hardware live notification
+// The Apple's Super Serial Card, reached one of three ways - always as a TCP
+// byte stream:
+//   --serial COM12 [--baud 9600] [--rtscts]   a real Apple II on a PC COM port;
+//                                              tools/com_relay.py relays it to
+//                                              127.0.0.1:<--relay-port 6502>
+//   --stm32 [--host 169.254.246.139]           the STM32 emulator board, TCP 6502
+//   (default) [--host 127.0.0.1 --port 1977]   AppleWin's SSC socket
+const argv = process.argv;
+const argOf = (name, def) => {
+  const i = argv.indexOf(name);
+  return i !== -1 && argv[i + 1] ? argv[i + 1] : def;
+};
 let bridge = null;
-try {
-  bridge = new SerialBridge({ mode: 'tcp-client', tcpHost: '127.0.0.1', tcpPort: 1977 });
-  bridge.start();
-  bridge.on('connected', () => console.log('[Bridge] Apple II SSC Connected on port 1977'));
-  bridge.on('error', () => {}); // silence if AppleWin is not running
-} catch (e) {
-  // Bridge optional
+let relayProc = null;
+const isStm32 = argv.includes('--stm32');
+const SERIAL_PORT = argOf('--serial', process.env.SERIAL_PORT || null);
+const SERIAL_BAUD = parseInt(argOf('--baud', process.env.SERIAL_BAUD || '9600'), 10);
+const RELAY_PORT = parseInt(argOf('--relay-port', '6502'), 10);
+const BRIDGE_HOST = SERIAL_PORT ? '127.0.0.1'
+  : (process.env.BRIDGE_HOST || argOf('--host', isStm32 ? '169.254.246.139' : '127.0.0.1'));
+const BRIDGE_PORT = SERIAL_PORT ? RELAY_PORT
+  : parseInt(process.env.BRIDGE_PORT || argOf('--port', isStm32 ? '6502' : '1977'), 10);
+const BRIDGE_ENABLED = !argv.includes('--no-bridge');
+const BRIDGE_LABEL = SERIAL_PORT ? `${SERIAL_PORT} @ ${SERIAL_BAUD}` : `${BRIDGE_HOST}:${BRIDGE_PORT}`;
+// Text notices to the Apple (file saved, ...) go over the SSC, which is now the
+// Apple's keyboard: they would be typed into BASIC. Only with --notify.
+const NOTIFY_ENABLED = argv.includes('--notify');
+
+if (BRIDGE_ENABLED && SERIAL_PORT) {
+  const relayArgs = [path.join(__dirname, 'tools', 'com_relay.py'), SERIAL_PORT,
+    '--baud', String(SERIAL_BAUD), '--port', String(RELAY_PORT)];
+  if (argv.includes('--rtscts')) relayArgs.push('--rtscts');
+  relayProc = require('child_process').spawn(PYTHON_CMD, relayArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const relayOut = (d) => d.toString().split(/\r?\n/).filter(Boolean).forEach((l) => console.log(l));
+  relayProc.stdout.on('data', relayOut);
+  relayProc.stderr.on('data', relayOut);
+  relayProc.on('exit', (code) => {
+    console.error(`[COM] relay ended (code ${code}). Check the port name and that pyserial is installed (python -m pip install pyserial).`);
+    relayProc = null;
+  });
+  process.on('exit', () => { if (relayProc) relayProc.kill(); });
+  process.on('SIGINT', () => process.exit());
+}
+
+if (BRIDGE_ENABLED) {
+  try {
+    bridge = new SerialBridge({ mode: 'tcp-client', tcpHost: BRIDGE_HOST, tcpPort: BRIDGE_PORT });
+    bridge.start();
+    bridge.on('connected', () => console.log(`[Bridge] Apple II SSC connected (${BRIDGE_LABEL})`));
+    bridge.on('error', () => {}); // silence if not running
+  } catch (e) {
+    // Bridge optional
+  }
+}
+
+// The Apple's floppy and keyboard over the SSC (remote_disk.js, apple2/a2srv.s)
+const remoteDisk = bridge ? new RemoteDisk(bridge, {
+  board: isStm32 ? BRIDGE_HOST : null,   // the board's key/CLI ports, emulator only
+  baud: SERIAL_PORT ? SERIAL_BAUD : 0,
+  charDelayMs: SERIAL_PORT ? 2 : 0,      // a real SSC holds one received byte
+  lineDelayMs: SERIAL_PORT ? 400 : 250
+}) : null;
+const remoteState = {
+  phase: 'idle',      // idle | loading | reading | done | error
+  message: '',
+  track: 0,
+  tracks: 35,
+  log: [],
+  lastSync: null      // { at, ms, volume, unreadable }
+};
+
+function remoteLog(msg) {
+  console.log(`[A2SRV] ${msg}`);
+  remoteState.message = msg;
+  remoteState.log.push(`${new Date().toLocaleTimeString()} ${msg}`);
+  if (remoteState.log.length > 30) remoteState.log.shift();
+}
+
+/** ?disk=remote selects the disk read from the Apple's drive 1; anything else the local one. */
+function diskFor(req) {
+  const which = String((req.query && req.query.disk) || (req.body && req.body.disk) || 'local').toLowerCase();
+  if (which === 'remote' || which === 'stm32') {
+    return { id: 'remote', path: REMOTE_DSK, name: 'drive1.dsk', readOnly: true };
+  }
+  return { id: 'local', path: DSK_PATH, name: 'apple2-web.dsk', readOnly: false };
 }
 
 function notifyAppleII(msg) {
+  if (!NOTIFY_ENABLED) return;
+  // A2SRV owns the SSC while it runs; text would only be thrown away there.
+  if (remoteDisk && remoteDisk.serverRunning) return;
   if (bridge && bridge.isConnected) {
     try {
       bridge.sendLine(`\r\n*** [WEB NOTICE] ${msg} ***\r\n`);
@@ -187,17 +271,19 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // 1. 파일 목록 조회 (JSON)
 app.get('/api/files', (req, res) => {
-  if (!fs.existsSync(DSK_PATH)) {
-    return res.status(404).json({ error: 'apple2-web.dsk 파일이 없습니다.' });
+  const disk = diskFor(req);
+  if (!fs.existsSync(disk.path)) {
+    const hint = disk.id === 'remote' ? ' [📡 Apple에서 읽기]로 먼저 Apple 드라이브 1을 읽어 오세요.' : '';
+    return res.status(404).json({ error: `${disk.name} 파일이 없습니다.${hint}` });
   }
 
-  exec(`"${PYTHON_CMD}" "${AC_TOOL}" json "${DSK_PATH}"`, (err, stdout, stderr) => {
+  exec(`"${PYTHON_CMD}" "${AC_TOOL}" json "${disk.path}"`, (err, stdout, stderr) => {
     if (err) {
       return res.status(500).json({ error: stderr || err.message });
     }
     try {
       const files = JSON.parse(stdout.trim());
-      res.json({ success: true, disk: 'apple2-web.dsk', count: files.length, files });
+      res.json({ success: true, disk: disk.name, source: disk.id, readOnly: disk.readOnly, count: files.length, files });
     } catch (e) {
       res.status(500).json({ error: '파일 목록 파싱 실패: ' + e.message });
     }
@@ -206,12 +292,22 @@ app.get('/api/files', (req, res) => {
 
 // 2. 파일 내용 조회/추출 (BASIC은 텍스트, 바이너리는 Raw Hex)
 app.get('/api/files/:filename', (req, res) => {
-  const filename = req.params.filename.toUpperCase();
+  // The name exactly as the catalog has it: DOS 3.3 names may hold spaces
+  // ("GUN SOUND.OBJ") or control characters. It goes to Python as an
+  // argument (execFile, no shell), so nothing in it is interpreted.
+  const filename = req.params.filename;
+  if (!filename || filename.length > 30 || /[\0"]/.test(filename)) {
+    return res.status(400).json({ error: '잘못된 파일명입니다.' });
+  }
   const fileType = (req.query.type || '').toUpperCase();
+  const disk = diskFor(req);
+  if (!fs.existsSync(disk.path)) {
+    return res.status(404).json({ error: `${disk.name} 파일이 없습니다.` });
+  }
 
   if (fileType === 'B') {
     const tempBin = path.join(__dirname, `_temp_${Date.now()}.bin`);
-    exec(`"${PYTHON_CMD}" "${AC_TOOL}" get "${DSK_PATH}" "${filename}" "${tempBin}"`, (err, stdout, stderr) => {
+    execFile(PYTHON_CMD, [AC_TOOL, 'get', disk.path, filename, tempBin], (err, stdout, stderr) => {
       if (err || !fs.existsSync(tempBin)) {
         return res.status(500).json({ error: stderr || err?.message || '바이너리 추출 실패' });
       }
@@ -230,7 +326,7 @@ app.get('/api/files/:filename', (req, res) => {
       }
     });
   } else {
-    exec(`"${PYTHON_CMD}" "${AC_TOOL}" export "${DSK_PATH}" "${filename}"`, (err, stdout, stderr) => {
+    execFile(PYTHON_CMD, [AC_TOOL, 'export', disk.path, filename], { maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         return res.status(500).json({ error: stderr || err.message });
       }
@@ -242,6 +338,9 @@ app.get('/api/files/:filename', (req, res) => {
 // 3. 새 파일 추가 / 수정 (BASIC 텍스트 또는 바이너리 Hex 저장 - 뮤텍스 & 안전 스냅샷 보장)
 app.post('/api/files', (req, res) => {
   let { filename, content, type, hex } = req.body;
+  if (diskFor(req).readOnly) {
+    return res.status(403).json({ error: 'Apple에서 읽어 온 디스크는 읽기 전용입니다. 로컬 디스크로 전환한 뒤 저장하세요.' });
+  }
   if (!filename) {
     return res.status(400).json({ error: '파일명이 필요합니다.' });
   }
@@ -302,7 +401,10 @@ app.post('/api/files', (req, res) => {
 
 // 4. 파일 삭제 (뮤텍스 & 안전 스냅샷 보장)
 app.delete('/api/files/:filename', (req, res) => {
-  const filename = req.params.filename.toUpperCase();
+  const filename = req.params.filename.toUpperCase().replace(/[^A-Z0-9_\-\.]/g, '');
+  if (diskFor(req).readOnly) {
+    return res.status(403).json({ error: 'Apple에서 읽어 온 디스크는 읽기 전용입니다.' });
+  }
 
   withDiskLock(() => {
     return new Promise((resolve, reject) => {
@@ -371,11 +473,195 @@ app.post('/api/backups/create', (req, res) => {
 
 // 8. 디스크 이미지 (.dsk) 통째로 다운로드
 app.get('/api/download/dsk', (req, res) => {
-  if (fs.existsSync(DSK_PATH)) {
-    res.download(DSK_PATH, 'apple2-web.dsk');
+  const disk = diskFor(req);
+  if (fs.existsSync(disk.path)) {
+    res.download(disk.path, disk.name);
   } else {
     res.status(404).send('DSK 파일이 존재하지 않습니다.');
   }
+});
+
+// 9. 브릿지 및 서버 상태 확인
+app.get('/api/status', (req, res) => {
+  res.json({
+    status: 'online',
+    targetDsk: DSK_PATH,
+    bridge: bridge ? bridge.getStatus() : { connected: false }
+  });
+});
+
+// =========================================================
+// 11. Apple II 원격 키보드 & 드라이브 1 읽기 (Super Serial Card)
+//     실기(COM 포트) / STM32 에뮬레이터 / AppleWin 공통
+// =========================================================
+const REMOTE_BOOT_DSK = path.join(__dirname, 'a2remote.dsk');
+const typedHistory = [];   // 웹에서 보낸 명령 기록 (최근 50개)
+
+function remoteStatus() {
+  const exists = fs.existsSync(REMOTE_DSK);
+  return {
+    available: !!remoteDisk,
+    link: SERIAL_PORT ? 'serial' : isStm32 ? 'stm32' : 'tcp',
+    target: BRIDGE_LABEL,
+    sscConnected: !!(bridge && bridge.isConnected),
+    serverRunning: !!(remoteDisk && remoteDisk.serverRunning),
+    busy: !!(remoteDisk && remoteDisk.busy) || remoteState.phase === 'loading' || remoteState.phase === 'reading',
+    phase: remoteState.phase,
+    message: remoteState.message,
+    done: remoteState.done || 0,
+    total: remoteState.total || 0,
+    log: remoteState.log,
+    typed: typedHistory.slice(-20),
+    lastSync: remoteState.lastSync,
+    snapshot: exists ? { path: REMOTE_DSK, mtime: fs.statSync(REMOTE_DSK).mtime } : null
+  };
+}
+
+function requireRemote(res) {
+  if (!remoteDisk) {
+    res.status(503).json({ error: 'SSC 브릿지가 꺼져 있습니다 (--no-bridge).' });
+    return false;
+  }
+  if (!bridge.isConnected) {
+    res.status(503).json({ error: `SSC(${BRIDGE_LABEL})에 연결되어 있지 않습니다. 케이블/보드 전원과 서버 실행 옵션(--serial COMx 또는 --stm32)을 확인하세요.` });
+    return false;
+  }
+  if (remoteDisk.busy || remoteState.phase === 'loading' || remoteState.phase === 'reading') {
+    res.status(409).json({ error: '지금 Apple 디스크를 읽는 중입니다. 끝난 뒤 다시 시도하세요.' });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/remote/status', (req, res) => {
+  res.json(remoteStatus());
+});
+
+// Apple에 A2SRV를 띄워(BRUN A2SRV) 드라이브 1을 읽고 remote/drive1.dsk 로 저장한 뒤,
+// A2SRV를 끝내 BASIC 프롬프트로 돌려 놓음. 기본은 VTOC에서 사용 중인 트랙만 읽음
+// ({ full: true } 이면 35트랙 전부). 202를 바로 돌려주고 진행은 /api/remote/status.
+app.post('/api/remote/sync', (req, res) => {
+  if (!requireRemote(res)) return;
+  const full = !!(req.body && req.body.full);
+
+  remoteState.phase = 'loading';
+  remoteState.done = 0;
+  remoteState.total = 0;
+  remoteState.log = [];
+  remoteLog('A2SRV 시작 중...');
+  res.status(202).json({ success: true, message: 'Apple 드라이브 1 읽기를 시작했습니다.' });
+
+  (async () => {
+    try {
+      await remoteDisk.load(remoteLog);
+      remoteState.phase = 'reading';
+      remoteLog(full ? '드라이브 1 전체(35트랙) 읽는 중...' : '드라이브 1 읽는 중 (VTOC의 사용 트랙만)...');
+      const r = await remoteDisk.readDisk({
+        full,
+        onProgress: (p) => {
+          remoteState.done = p.done || 0;
+          remoteState.total = p.total || 0;
+        }
+      });
+      try {
+        await remoteDisk.quit();
+      } catch (e) {
+        remoteLog(`A2SRV 종료 응답 없음: ${e.message}`);
+      }
+      fs.mkdirSync(REMOTE_DIR, { recursive: true });
+      fs.writeFileSync(REMOTE_DSK, r.image);
+      remoteState.lastSync = {
+        at: new Date().toISOString(),
+        ms: r.ms,
+        volume: r.volume,
+        dos: r.dos,
+        tracksRead: 35 - r.skipped.length,
+        unreadable: r.unreadable
+      };
+      remoteState.phase = 'done';
+      remoteLog(`완료: ${35 - r.skipped.length}트랙, ${(r.ms / 1000).toFixed(1)}초, 읽지 못한 섹터 ${r.unreadable.length}개`);
+    } catch (e) {
+      remoteState.phase = 'error';
+      remoteLog(`오류: ${e.message}`);
+      // A2SRV가 떠 있으면 내려서 키보드(SSC) 입력이 BASIC으로 돌아가게 함
+      if (remoteDisk.serverRunning) {
+        try { await remoteDisk.quit(); } catch (e2) {}
+      }
+    }
+  })();
+});
+
+// 웹에서 입력한 명령을 SSC로 Apple 키보드처럼 입력 (화면 결과는 돌려받지 않음)
+// body: { text: "CATALOG", enter: true }  — 여러 줄이면 줄마다 RETURN
+//       { key: "ctrl-c" | "return" | "esc" | "ctrl-x" }
+app.post('/api/remote/type', async (req, res) => {
+  if (!requireRemote(res)) return;
+  const body = req.body || {};
+  const keys = { 'ctrl-c': '\x03', return: '\r', esc: '\x1b', 'ctrl-x': '\x18', 'ctrl-s': '\x13' };
+  let text;
+  let enter = body.enter !== false;
+  if (body.key) {
+    text = keys[String(body.key).toLowerCase()];
+    if (text === undefined) return res.status(400).json({ error: `알 수 없는 키: ${body.key}` });
+    enter = false;
+  } else {
+    text = String(body.text || '');
+    if (!text && !enter) return res.status(400).json({ error: '입력할 내용이 없습니다.' });
+    if (text.length > 4000) return res.status(400).json({ error: '한 번에 4000자까지 보낼 수 있습니다.' });
+    // Apple 쪽에는 7비트 ASCII만
+    text = text.replace(/[^\x00-\x7f]/g, '');
+  }
+  try {
+    // 서버 재시작 직후엔 A2SRV가 아직 떠 있는지 모름: 한 번만 확인
+    if (remoteDisk.serverRunning === null) await remoteDisk.ping();
+    if (remoteDisk.serverRunning) {
+      await remoteDisk.quit(); // A2SRV가 SSC를 쥐고 있으면 먼저 BASIC으로
+    }
+    await remoteDisk.type(text, { enter });
+    typedHistory.push({ at: new Date().toISOString(), text: body.key ? `<${body.key}>` : text });
+    if (typedHistory.length > 50) typedHistory.shift();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// A2SRV가 떠 있으면 끝내고 BASIC 프롬프트로
+app.post('/api/remote/quit', async (req, res) => {
+  if (!requireRemote(res)) return;
+  try {
+    await remoteDisk.quit();
+    remoteLog('A2SRV 종료');
+    res.json({ success: true, message: 'A2SRV를 종료했습니다.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 실기 부팅용 A2REMOTE.DSK 다운로드 (없으면 build_remote_dsk.py로 만듦)
+app.get('/api/download/a2remote', (req, res) => {
+  const send = () => res.download(REMOTE_BOOT_DSK, 'A2REMOTE.DSK');
+  if (fs.existsSync(REMOTE_BOOT_DSK)) return send();
+  execFile(PYTHON_CMD, [path.join(__dirname, 'build_remote_dsk.py'), REMOTE_BOOT_DSK], (err, stdout, stderr) => {
+    if (err) return res.status(500).send(stderr || err.message);
+    send();
+  });
+});
+
+// 10. STM32 에뮬레이터 SD 카드로 A2WEB.DSK 실시간 업로드 (SWD)
+app.post('/api/upload/stm32', (req, res) => {
+  const uploadScript = path.join(__dirname, '..', 'STM32CubeIDE', 'STM32F769I-DISCO', 'tools', 'sd-upload.ps1');
+  if (!fs.existsSync(uploadScript)) {
+    return res.status(404).json({ error: 'sd-upload.ps1 스크립트를 찾을 수 없습니다.' });
+  }
+
+  exec(`pwsh -File "${uploadScript}" "${DSK_PATH}" -Name A2WEB.DSK`, (err, stdout, stderr) => {
+    if (err) {
+      return res.status(500).json({ error: stderr || err.message });
+    }
+    notifyAppleII('NEW DSK UPLOADED TO SD CARD (A2WEB.DSK).');
+    res.json({ success: true, message: 'STM32 SD 카드로 A2WEB.DSK 업로드 완료', output: stdout });
+  });
 });
 
 // 서버 구동

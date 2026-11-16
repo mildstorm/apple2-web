@@ -5,3 +5,5 @@ __pycache__/
 *.tmp
 _temp_*
 backups/*.dsk
+remote/
+apple2/*.lst

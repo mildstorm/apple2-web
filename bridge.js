@@ -11,6 +11,7 @@
  */
 
 const net = require('net');
+const os = require('os');
 const EventEmitter = require('events');
 
 class SerialBridge extends EventEmitter {
@@ -19,6 +20,7 @@ class SerialBridge extends EventEmitter {
     this.mode = options.mode || 'tcp-client'; // 'tcp-client', 'tcp-server', 'serial'
     this.tcpHost = options.tcpHost || '127.0.0.1';
     this.tcpPort = options.tcpPort || 1977;
+    this.localAddress = options.localAddress || null;
     this.serialPortName = options.serialPort || null;
     this.baudRate = options.baudRate || 9600;
     this.reconnectInterval = options.reconnectInterval || 2000;
@@ -94,7 +96,17 @@ class SerialBridge extends EventEmitter {
       this._scheduleReconnect();
     });
 
-    socket.connect(this.tcpPort, this.tcpHost);
+    const connectOpts = {
+      host: this.tcpHost,
+      port: this.tcpPort
+    };
+
+    const localAddress = this.localAddress || SerialBridge.linkLocalSource(this.tcpHost);
+    if (localAddress) {
+      connectOpts.localAddress = localAddress;
+    }
+
+    socket.connect(connectOpts);
   }
 
   _scheduleReconnect() {
@@ -313,5 +325,29 @@ class SerialBridge extends EventEmitter {
     this.isConnected = false;
   }
 }
+
+/**
+ * A link-local board (169.254.x.x, the STM32 on a direct cable) is only
+ * reachable from the PC's own link-local address, and Windows does not always
+ * pick that one as the source. Returns the address to bind, or null.
+ * BRIDGE_LOCAL_ADDR overrides the search.
+ */
+SerialBridge.linkLocalSource = function (host) {
+  if (process.env.BRIDGE_LOCAL_ADDR) return process.env.BRIDGE_LOCAL_ADDR;
+  if (!host || !host.startsWith('169.254.')) return null;
+  try {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      const lname = name.toLowerCase();
+      if (lname.includes('tailscale') || lname.includes('bluetooth')) continue;
+      for (const addr of ifaces[name]) {
+        if (addr.family === 'IPv4' && !addr.internal && addr.address.startsWith('169.254.')) {
+          return addr.address;
+        }
+      }
+    }
+  } catch (e) {}
+  return null;
+};
 
 module.exports = SerialBridge;

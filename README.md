@@ -60,6 +60,14 @@
 * AppleWin의 SSC TCP 소켓(기본 포트 1977) 또는 실제 물리 시리얼 COM 포트와 연결.
 * Apple II 콘솔과 웹 브라우저 간의 실시간 양방향 채팅 및 HTTP REST API 통신 지원.
 
+### 6. ⌨️📡 Apple II 원격 키보드 & 디스크 보기 (SSC 경유, 실기/STM32 공통)
+키보드가 고장 난 실기를 위해 만든 기능입니다. **`A2REMOTE.DSK`** 로 부팅하면 SSC(슬롯 2)가 키보드가 됩니다.
+* **원격 키보드**: 웹의 `⌨️ Apple 키보드` 칸에 `CATALOG`, `RUN 프로그램`, `10 PRINT "HI"`, `SAVE 이름` 등을 입력하면 SSC로 Apple에 그대로 타이핑됩니다 (화면 결과는 돌려받지 않음). Ctrl-C / RETURN / ESC 버튼, 여러 줄 붙여넣기 지원.
+* **디스크 보기**: `[📡 Apple에서 읽기]` 를 누르면 서버가 `BRUN A2SRV` 를 입력해 Apple 안의 작은 6502 섹터 서버(`apple2/a2srv.s`)를 띄우고, 드라이브 1을 읽어 `remote/drive1.dsk` 로 저장한 뒤 A2SRV를 끝내 `]` 프롬프트로 돌려 놓습니다. 웹의 파일 목록·BASIC 소스·Hex·디스어셈블리로 볼 수 있습니다 (읽기 전용).
+* A2SRV는 Disk II를 **니블 단위로 직접** 읽고, PC 쪽(`remote_disk.js`)이 4&4/6&2 디코딩과 체크섬 검사를 합니다. 기본으로 **VTOC에서 사용 중인 트랙만** 읽습니다 (A2REMOTE.DSK는 6트랙: 실기 9600bps에서 약 40초, STM32에서 약 7초).
+* A2SRV는 DOS가 기억하는 헤드 위치(`$047E`)에서 시작하고 끝날 때 그 자리로 되돌려 놓으므로, 읽은 뒤에도 DOS를 그대로 쓸 수 있습니다.
+* STM32 에뮬레이터에서 같은 `A2REMOTE.DSK` 로 똑같이 동작하는 것을 확인했습니다.
+
 ---
 
 ## 🏛️ 시스템 아키텍처 (Architecture)
@@ -101,6 +109,8 @@
 * **Python 3.x**
 * **Java (JRE/JDK 8 이상)**: AppleCommander를 통한 DSK 조작용
 * **AppleWin** (Apple //e 에뮬레이터, 선택 사항)
+* **pyserial** (실기를 COM 포트로 연결할 때만): `python -m pip install pyserial`
+* **xa** 6502 어셈블러 (A2SRV를 고칠 때만, MSYS2 `pacman -S mingw-w64-ucrt-x86_64-xa`)
 
 ### 2. 저장소 복제 및 의존성 설치
 ```bash
@@ -110,11 +120,24 @@ npm install
 ```
 
 ### 3. 서버 실행
-```bash
-npm start
-```
+연결할 Apple에 따라 실행 방법을 고릅니다.
+
+| 대상 | 실행 명령 | SSC 연결 |
+| :--- | :--- | :--- |
+| AppleWin (기본) | `npm start` | `127.0.0.1:1977` |
+| STM32 에뮬레이터 | `npm run start:stm32` | 보드 `169.254.246.139:6502` (RJ45 직결) |
+| Apple II 실기 | `node server.js --serial COM12 --baud 9600` | USB-RS232 + 널 모뎀 → SSC 슬롯 2 |
+
 서버가 기동되면 웹 브라우저에서 아래 주소로 접속합니다:
 👉 **http://localhost:3000**
+
+### 4. 키보드 없는 실기를 웹으로 쓰기 (요약)
+1. `npm run build:remote-dsk` 로 만든 `a2remote.dsk` 를 디스켓에 기록해 실기에 넣고 부팅 → SSC가 키보드가 됩니다.
+2. `node server.js --serial COMx --baud 9600` 실행 후 브라우저 접속.
+3. `⌨️ Apple 키보드` 칸에 `CATALOG`, `RUN 이름`, BASIC 줄, `SAVE 이름` 등을 입력하고 Enter.
+4. `[📡 Apple에서 읽기]` 로 실기 드라이브 1의 파일 목록을 갱신하고, 파일을 눌러 BASIC 소스·Hex·디스어셈블리로 확인.
+
+자세한 내용은 아래 [사용 가이드 4](#4-키보드-없는-apple-ii-실기를-웹으로-조작하고-디스크-보기-a2remotedsk)를 보세요.
 
 ---
 
@@ -151,6 +174,85 @@ npm start
 3. 프롬프트(`]`)에서 **`CATALOG`**를 입력하면 웹에서 추가/수정한 파일들이 모두 나타납니다.
 4. `RUN 파일명` 또는 `BRUN 파일명`으로 에뮬레이터에서 즉시 실행해 볼 수 있습니다.
 
+### 4. 키보드 없는 Apple II 실기를 웹으로 조작하고 디스크 보기 (A2REMOTE.DSK)
+
+#### ① 부팅 디스크 만들기
+```bash
+npm run build:remote-dsk
+```
+`a2remote.dsk` 가 생성됩니다 (웹의 `💾 A2REMOTE.DSK` 버튼으로도 받을 수 있음). 내용은 DOS 3.3 + 두 파일뿐입니다.
+
+| 파일 | 역할 |
+| :--- | :--- |
+| `HELLO` | 부팅 시 실행. `PRINT CHR$(4);"IN#2"` 로 DOS 입력을 SSC(슬롯 2)로 돌림 → PC가 키보드 |
+| `A2SRV` | `$6000` 섹터 서버. 서버가 `BRUN A2SRV` 로 실행해 디스크를 읽고, 끝나면 BASIC으로 RTS |
+
+이 이미지를 실제 5.25" 디스켓에 기록합니다 (ADTPro, 또는 Disk II를 PC에 연결하는 Applesauce/Greaseweazle 등).
+
+#### ② 실기 연결
+```
+[Apple II SSC 슬롯 2 (DB-25 또는 10핀→DB-25)] ── 널 모뎀 케이블 ── [USB-RS232 어댑터] ── [PC COMx]
+```
+* SSC 점퍼 블록은 **`TERMINAL`** 방향 (널 모뎀 케이블일 때 `MODEM`).
+* SSC DIP 스위치 SW1으로 **9600 bps** (SW1-1~4 = ON ON ON OFF), SW2: 8 데이터 비트·1 정지 비트·패리티 없음.
+* 6551은 CTS가 있어야 송신하고, SSC 펌웨어는 DSR/DCD를 봅니다. 릴레이는 PC 쪽 DTR·RTS를 켜 두므로 널 모뎀 케이블이 이것들을 교차 연결하면 됩니다.
+
+#### ③ 서버 실행 (실기 모드)
+```bash
+python -m pip install pyserial
+```
+```bash
+node server.js --serial COM12 --baud 9600
+```
+COM 포트 이름은 `python tools/com_relay.py --list` 로 확인합니다. 서버가 `tools/com_relay.py` 를 띄워 COM 포트를 `127.0.0.1:6502` 로 중계하고 그곳에 접속합니다 (하드웨어 흐름 제어가 필요하면 `--rtscts`).
+
+> Node 26에서는 `serialport` 네이티브 모듈이 로드되지 않아 COM 포트를 Python(pyserial) 릴레이로 엽니다.
+
+#### ④ 사용
+1. 실기에 A2REMOTE 디스켓을 넣고 전원을 켭니다. 화면에 `APPLE2-WEB REMOTE DISK ... KEYBOARD INPUT: SUPER SERIAL CARD SLOT 2` 가 나오고 `]` 에서 SSC 입력을 기다립니다.
+2. 브라우저 `http://localhost:3000` 의 `⌨️ Apple 키보드` 칸에 명령을 입력하고 Enter.
+   * `CATALOG` 가 한 화면을 넘으면 DOS가 키를 기다리므로 **`RETURN`** 버튼을 누릅니다.
+   * BASIC 프로그램 중단은 **`Ctrl-C`**. (Control-Reset은 시리얼로 보낼 수 없습니다.)
+   * 여러 줄(BASIC 프로그램)은 **`여러 줄…`** 에 붙여넣기 → 한 줄씩 RETURN과 함께 입력.
+   * `대문자` 체크(기본)는 입력을 대문자로 바꿉니다 (DOS 3.3 명령은 대문자).
+3. 명령이 끝난 뒤 **`[📡 Apple에서 읽기]`** 를 누르면 드라이브 1을 읽어 파일 목록이 갱신됩니다. 디스켓을 바꿔 넣고 읽으면 그 디스켓의 목록이 나옵니다. A2SRV가 없는 디스켓이면 `CALL-151` 후 모니터 헥스 줄로 A2SRV를 SSC로 보내 실행하고, 끝나면 `3D0G` 로 BASIC에 돌아갑니다.
+4. `35트랙 전체` 를 체크하면 VTOC와 상관없이 전부 읽습니다 (DOS가 아닌 디스크는 자동으로 전체).
+
+> 주의: 웹에서 입력한 글자는 그대로 Apple 키보드 입력입니다. 프로그램이 실행 중일 때 `[Apple에서 읽기]` 를 누르면 `BRUN A2SRV` 가 그 프로그램에 입력되니, `]` 프롬프트 상태에서 누르세요.
+
+#### STM32 에뮬레이터로 같은 동작 확인
+```bash
+npm run start:stm32
+```
+1. `a2remote.dsk` 를 보드 SD 카드에 올리고 드라이브 1에 넣습니다.
+   ```bash
+   pwsh -File ../STM32CubeIDE/STM32F769I-DISCO/tools/sd-upload.ps1 a2remote.dsk -Name A2REMOTE.DSK
+   ```
+   보드 CLI(텔넷 2323)에서 `disk next` 로 `A2REMOTE.DSK` 가 나올 때까지 넘깁니다.
+2. 부팅: 에뮬레이터는 콜드 리셋 시 슬롯 7(SmartPort)을 먼저 부팅하므로, `]` 에서 `PR#6`, 모니터 `*` 에서 `C600G` 를 입력합니다. 이미 A2REMOTE로 부팅되어 있으면 웹 키보드로 `PR#6` 을 보내도 됩니다.
+3. 이후는 실기와 같습니다.
+
+명령줄 도구:
+```bash
+node remote_disk.js type CATALOG
+```
+```bash
+node remote_disk.js dump remote/drive1.dsk
+```
+`--host/--port` 로 대상(기본 `169.254.246.139:6502`), `--baud 9600` 으로 실기 속도, `--full` 로 35트랙 전체를 지정합니다. PC에 169.254 대역 인터페이스가 여럿이면 `BRIDGE_LOCAL_ADDR` 환경 변수로 소스 주소를 고정합니다.
+
+A2SRV를 고쳤다면 `npm run build:a2srv` (MSYS2 `xa` 어셈블러) 후 `npm run build:remote-dsk` 로 디스크를 다시 만듭니다.
+
+**A2SRV 프로토콜** (PC → Apple: `$AA` 동기 바이트 + 명령)
+
+| 명령 | 응답 |
+| :--- | :--- |
+| `$AA 'P'` | `A2SV1` |
+| `$AA 'T' <트랙>` | 읽은 섹터마다 `'S'` + 주소 니블 8 + 데이터 니블 343, 끝에 `'E' 0` (일부 못 읽으면 `'X' <남은 수>`) |
+| `$AA 'Q'` | 헤드를 DOS 위치로 되돌리고 `'Q'`, 호출한 곳(BASIC/모니터)으로 RTS. SSC 입력은 그대로 |
+
+A2SRV는 트랙을 먼저 `$6600-$85FF`에 모두 읽은 뒤 한꺼번에 보냅니다 (보내는 동안 디스크가 돌아 섹터를 놓치지 않도록). 사용 메모리: 코드 `$6000-$6306`, 버퍼 `$6600-$85FF`, 제로페이지 `$06-$09 $CE-$CF $EB $FA-$FF`. 메모리에 있는 BASIC 프로그램이 매우 커서(문자열 포함) 이 영역을 쓰고 있으면 덮어쓸 수 있습니다.
+
 ---
 
 ## 📡 REST API 명세 (API Endpoints)
@@ -166,6 +268,15 @@ npm start
 | `POST` | `/api/backups/rollback` | 특정 스냅샷 시점으로 디스크 안전 롤백(복원) |
 | `POST` | `/api/backups/create` | 수동 디스크 체크포인트 스냅샷 생성 |
 | `GET` | `/api/download/dsk` | 수정된 `apple2-web.dsk` 디스크 이미지 파일 다운로드 |
+| `GET` | `/api/remote/status` | SSC 연결(실기/STM32), A2SRV 실행 여부, 읽기 진행, 마지막 읽기 결과, 최근 입력 |
+| `POST` | `/api/remote/type` | `{ "text": "CATALOG" }` 를 SSC로 Apple에 타이핑 (줄마다 RETURN). `{ "key": "ctrl-c" \| "return" \| "esc" }` |
+| `POST` | `/api/remote/sync` | `BRUN A2SRV` → 드라이브 1 읽기 → `remote/drive1.dsk` 저장 → A2SRV 종료. `{ "full": true }` 면 35트랙 전체 (202, 진행은 status로) |
+| `POST` | `/api/remote/quit` | 떠 있는 A2SRV 종료 (BASIC 프롬프트로) |
+| `GET` | `/api/download/a2remote` | 실기 부팅용 `A2REMOTE.DSK` 다운로드 |
+
+파일 조회 API(`/api/files`, `/api/files/:filename`, `/api/download/dsk`)에 **`?disk=remote`** 를 붙이면 Apple에서 읽어 온 디스크를 대상으로 합니다 (쓰기 API는 403).
+
+> SSC가 Apple의 키보드이므로, 파일 저장 시 Apple로 보내던 `*** [WEB NOTICE] ***` 알림은 기본으로 꺼져 있습니다 (`--notify` 로 켬).
 
 ---
 
@@ -182,10 +293,11 @@ Apple II 실기의 **Super Serial Card (Slot 2)**와 PC를 통신 브릿지로 �
    * DB9 to DB25 **널 모뎀(Null Modem / TX-RX 교차) 케이블** (또는 크로스 젠더)
 2. **SSC 카드 점퍼 설정**:
    * SSC 카드 가운데 점퍼 블록의 화살표를 **`TERMINAL`** 방향으로 꽂고 널 모뎀 케이블을 연결합니다.
-3. **서버 실행 명령**:
+3. **서버 실행 명령** (pyserial 필요: `python -m pip install pyserial`):
    ```bash
-   node server.js --mode serial --serial COM3 --baud 9600
+   node server.js --serial COM3 --baud 9600
    ```
+   자세한 사용법은 위의 [사용 가이드 4. A2REMOTE.DSK](#4-키보드-없는-apple-ii-실기를-웹으로-조작하고-디스크-보기-a2remotedsk) 참고.
 
 ### 방법 2. 무선 연결 (레트로 Wi-Fi 모뎀)
 ```
@@ -203,15 +315,23 @@ apple2-web/
 ├── backups/               # 디스크 자동 스냅샷 백업 저장소 (롤백용 타임스탬프 .dsk)
 ├── apple2/
 │   ├── HELLO.BAS          # DOS 3.3 기본 부팅 환영 프로그램 소스
-│   └── WEBCLIENT.BAS      # Apple II SSC 웹 클라이언트 & 브릿지 소스
+│   ├── WEBCLIENT.BAS      # Apple II SSC 웹 클라이언트 & 브릿지 소스
+│   ├── REMOTE_HELLO.BAS   # A2REMOTE.DSK의 HELLO (IN#2: SSC를 키보드로)
+│   ├── a2srv.s            # A2SRV: SSC로 Disk II 섹터를 보내는 6502 섹터 서버 (xa 문법)
+│   └── a2srv.bin          # 어셈블된 A2SRV ($6000)
+├── remote/                # SSC로 읽어 온 Apple 드라이브 1 사본 drive1.dsk (git 제외)
 ├── public/
 │   └── index.html         # 레트로 CRT 테마 웹 대시보드, Hex Editor & 6502 Disassembler
 ├── tools/
 │   ├── AppleCommander.jar # AppleCommander DOS 3.3 디스크 처리 엔진
+│   ├── com_relay.py       # 실기 COM 포트 ↔ TCP 중계 (pyserial)
 │   └── dos33_template.dsk # 초기 DOS 3.3 기본 디스크 템플릿
 ├── ac_tool.py             # AppleCommander CLI 래퍼 (json, get, put, put-basic, delete)
 ├── build_dsk.py           # Applesoft BASIC 토크나이저 및 DSK 이미지 빌더
+├── build_remote_dsk.py    # 실기 부팅용 a2remote.dsk 빌더 (HELLO + A2SRV)
+├── a2remote.dsk           # 실기 부팅용 원격 키보드 디스크
 ├── bridge.js              # Apple II SSC <-> TCP/시리얼 브릿지 모듈
+├── remote_disk.js         # SSC 원격 타이핑, A2SRV 실행, 트랙 요청, 4&4/6&2 디코딩, .dsk 생성 (CLI 겸용)
 ├── server.js              # Express HTTP 서버, DOS 3.3 파일 관리, 디스크 뮤텍스 & 롤백 API
 ├── apple2-web.dsk         # 부팅 가능한 실시간 Apple II DOS 3.3 디스크 이미지
 ├── package.json           # Node.js 프로젝트 설정 및 의존성
