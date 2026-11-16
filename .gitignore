@@ -7,3 +7,5 @@ _temp_*
 backups/*.dsk
 remote/
 apple2/*.lst
+# Claude 앱 미리보기용 로컬 설정 (이 PC 전용)
+.claude/
