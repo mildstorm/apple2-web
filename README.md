@@ -52,7 +52,7 @@
 * 수정한 바이너리를 디스크에 `[B]` 파일로 저장합니다.
 
 #### 3. ⚙️ 6502 / 65C02 Disassembler
-* 순수 JavaScript로 된 6502/65C02 역어셈블러입니다.
+* 브라우저 안에서 돌아가는 6502/65C02 역어셈블러입니다(`src/web/app.ts`, 외부 라이브러리 없음).
 * **Address / Hex Bytes / Instruction / Comments** 4단 표시. 기준 주소를 바꿀 수 있습니다(기본 `$0800`, 메모리 덤프는 덤프 시작 주소).
 * **Apple II ROM 심볼 자동 주석**: `$FC58` HOME, `$FDED` COUT, `$FD0C` RDKEY, `$C000` KBD, `$C030` SPKR 등. 분기 명령의 목표 주소도 계산해 줍니다.
 * 줄을 누르면 Hex Editor의 해당 바이트로 이동하고, 주소 검색(`$FDED` 등)으로 바로 찾아갑니다.
@@ -190,6 +190,33 @@ npm run build
 서버가 기동되면 웹 브라우저에서 아래 주소로 접속합니다:
 👉 **http://localhost:3000**
 
+Apple 없이 디스크 이미지만 다룰 때는 `npm start` 로 충분합니다. SSC에 연결하지 못해도 서버는 뜨고, 2초마다 다시 연결을 시도합니다.
+
+#### 서버 실행 옵션
+옵션은 `node dist/server.js` 뒤에 붙입니다 (예: `node dist/server.js --listen 0.0.0.0`). `npm start` 로 넘기려면 `--` 뒤에 쓰는데 (`npm start -- --listen 0.0.0.0`), PowerShell은 `--` 를 지워 버리므로 `npm start '--' --listen 0.0.0.0` 처럼 따옴표로 감쌉니다.
+
+| 옵션 | 기본값 | 설명 |
+| :--- | :--- | :--- |
+| `--listen <주소>` | `127.0.0.1` | 웹 서버가 받을 주소. 다른 기기에서 쓰려면 `0.0.0.0` (아래 보안 참고) |
+| `--serial <COM포트>` | 없음 | 실기를 COM 포트로 연결. `tools/com_relay.py` 를 띄워 TCP로 중계 |
+| `--baud <속도>` | `9600` | `--serial` 의 속도 (SSC DIP 스위치와 같게) |
+| `--rtscts` | 끔 | `--serial` 에서 하드웨어 흐름 제어 사용 |
+| `--relay-port <포트>` | `6502` | `--serial` 릴레이가 여는 로컬 TCP 포트 |
+| `--stm32` | 끔 | STM32 에뮬레이터 보드에 연결 (기본 호스트 `169.254.246.139`, 포트 `6502`) |
+| `--host <주소>` / `--port <포트>` | `127.0.0.1` / `1977` | SSC에 TCP로 접속할 주소 (AppleWin, 보드, Wi-Fi 모뎀) |
+| `--no-bridge` | 끔 | SSC에 연결하지 않음 (디스크 이미지 작업, 오디오 키 입력만) |
+| `--audio-pc` | 끔 | `--stm32` 여도 오디오 키 입력을 PC 스피커로 재생 |
+| `--notify` | 끔 | 파일 저장 등을 Apple에 `*** [WEB NOTICE] ***` 로 알림 (SSC가 키보드라 기본은 끔) |
+
+| 환경 변수 | 설명 |
+| :--- | :--- |
+| `PORT` | 웹 서버 포트 (기본 `3000`) |
+| `LISTEN_HOST` | `--listen` 과 같음 |
+| `SERIAL_PORT`, `SERIAL_BAUD` | `--serial`, `--baud` 와 같음 |
+| `BRIDGE_HOST`, `BRIDGE_PORT` | SSC 접속 주소. `--host`, `--port` 보다 우선 |
+| `BRIDGE_LOCAL_ADDR` | 169.254.x.x 보드에 접속할 때 PC 쪽 소스 주소를 고정 |
+| `PYTHON` | 사용할 Python 명령 (기본: `python3` / `python` / `py` 중 찾은 것) |
+
 > 🔒 **보안**: 이 서버에는 로그인이 없고, 웹 키보드는 Apple에 무엇이든 입력할 수 있습니다 (`INIT`, `DELETE` 등). 그래서 기본으로 **이 PC(127.0.0.1)에서만** 열립니다.
 > * 다른 기기(같은 집 네트워크, Tailscale 등)에서 접속하려면 `--listen 0.0.0.0` (또는 `--listen <그 인터페이스 주소>`)을 명시하세요. 이때는 신뢰하는 네트워크에서만 쓰고, PC가 공유기 없이 공인 IP를 직접 받는 환경이면 Windows 방화벽에서 Node.js의 **공용(Public)** 수신 허용을 꺼 두세요.
 > * Host 헤더가 localhost가 아닌 요청(DNS rebinding)과, 다른 웹사이트에서 보낸 POST/DELETE(CSRF)는 거절합니다.
@@ -234,7 +261,7 @@ npm run build
 
 ### 3. AppleWin 에뮬레이터에서 결과 확인
 1. AppleWin 에뮬레이터 드라이브 1에 `apple2-web.dsk`를 마운트합니다.
-2. AppleWin에서 **`F2`** (또는 `Ctrl + F2`)를 눌러 부팅합니다.
+2. AppleWin에서 **`F2`** 를 눌러 다시 시작(부팅)합니다.
 3. 프롬프트(`]`)에서 **`CATALOG`**를 입력하면 웹에서 추가/수정한 파일들이 모두 나타납니다.
 4. `RUN 파일명` 또는 `BRUN 파일명`으로 에뮬레이터에서 즉시 실행해 볼 수 있습니다.
 
@@ -387,6 +414,7 @@ A2SRV는 트랙을 먼저 `$6600-$85FF`에 모두 읽은 뒤 한꺼번에 보냅
 
 | 메소드 | 엔드포인트 | 설명 |
 | :--- | :--- | :--- |
+| `GET` | `/api/status` | 서버 상태와 SSC 브릿지 연결 상태 (JSON) |
 | `GET` | `/api/files` | `apple2-web.dsk` 디스크 내의 전체 파일 목록 조회 (JSON) |
 | `GET` | `/api/files/:filename` | 특정 BASIC 파일의 텍스트 소스 코드 추출 |
 | `GET` | `/api/files/:filename?type=B` | 특정 바이너리 파일의 Raw Hex 데이터 추출 |
@@ -408,6 +436,7 @@ A2SRV는 트랙을 먼저 `$6600-$85FF`에 모두 읽은 뒤 한꺼번에 보냅
 | `POST` | `/api/remote/diag` | `{ "lc": true, "rom": true }` 메모리 진단 시작 (202) |
 | `GET` | `/api/remote/diag` | 마지막 진단 결과 |
 | `POST` | `/api/remote/update-a2srv` | 드라이브 1 디스켓에 최신 A2SRV를 BSAVE하고 다시 읽어 확인 (202) |
+| `POST` | `/api/upload/stm32` | `apple2-web.dsk` 를 STM32 보드 SD 카드에 `A2WEB.DSK` 로 올림 (옆 폴더 `../STM32CubeIDE` 의 `sd-upload.ps1` 필요) |
 
 파일 조회 API(`/api/files`, `/api/files/:filename`, `/api/download/dsk`)에 **`?disk=remote`** 를 붙이면 Apple에서 읽어 온 디스크를 대상으로 합니다 (쓰기 API는 403).
 
@@ -443,6 +472,29 @@ Apple II 실기의 **Super Serial Card (Slot 2)**와 PC를 통신 브릿지로 �
 
 ---
 
+## 🛠️ 개발 (Development)
+
+서버(`src/server/`)와 웹 UI 스크립트(`src/web/app.ts`)는 TypeScript(strict)입니다. 고친 뒤에는 `npm run build` 로 `dist/` 를 다시 만들고 서버를 재시작합니다. 웹 UI의 HTML/CSS는 `public/index.html` 에 있고, 빌드 없이 바로 반영됩니다.
+
+### npm 스크립트
+| 명령 | 하는 일 |
+| :--- | :--- |
+| `npm run build` | 서버와 웹 UI를 `dist/` 로 컴파일 (`build:server`, `build:web` 따로도 가능). 타입 오류가 있으면 실패 |
+| `npm start` / `npm run start:stm32` | `dist/server.js` 실행 (AppleWin / STM32 보드) |
+| `npm test` | 통합 시험 (아래) |
+| `npm run test:audio` | A2KBDA 오디오 수신 시험 (py65 필요) |
+| `npm run remote:dump` / `remote:quit` | 명령줄로 드라이브 1 읽기 / A2SRV 종료 (`dist/remote_disk.js`) |
+| `npm run build:a2srv` / `build:a2kbda` | 6502 소스를 `xa` 로 어셈블 |
+| `npm run build:remote-dsk` | 실기 부팅용 `a2remote.dsk` 만들기 |
+| `npm run build:dsk` | `apple2-web.dsk` 를 템플릿에서 다시 만들기 (HELLO, WEBCLIENT). ⚠️ 지금 디스크 내용을 덮어씁니다 (`backups/` 에 스냅샷 없음) |
+| `npm run upload:stm32` | `apple2-web.dsk` 를 STM32 보드 SD 카드로 올리기 |
+
+### 시험
+* **`npm test`**: 가짜 SSC(TCP 19770)를 열고 `dist/server.js` 를 HTTP 3999번으로 띄운 뒤 확인합니다: 브릿지 연결, `/api/files` 카탈로그, 다른 Host 헤더·다른 사이트 POST 거절(403), `/api/remote/status`, 웹 키보드 입력(`CATALOG` + RETURN, Ctrl-C)이 SSC에 도착하는지. 따로 쓰는 포트라 실행 중인 서버나 AppleWin과 겹치지 않고, 디스크에는 쓰지 않습니다. 카탈로그 확인에 Python과 Java가 필요하며, 먼저 `npm run build` 를 해야 합니다.
+* **`npm run test:audio`**: `dist/audio_keys.js` 가 만든 WAV를 py65 6502 시뮬레이터에서 A2KBDA로 풀어 봅니다 (사용 가이드 4의 ③-1 "오디오 패킷 형식" 참고).
+
+---
+
 ## 📂 프로젝트 구조 (Directory Structure)
 
 ```
@@ -450,7 +502,7 @@ apple2-web/
 ├── backups/               # 디스크 자동 스냅샷 백업 저장소 (롤백용 타임스탬프 .dsk)
 ├── apple2/
 │   ├── HELLO.BAS          # DOS 3.3 기본 부팅 환영 프로그램 소스
-│   ├── WEBCLIENT.BAS      # Apple II SSC 웹 클라이언트 & 브릿지 소스
+│   ├── WEBCLIENT.BAS      # 키보드와 SSC를 함께 입력으로 쓰는 듀얼 콘솔 ($0300 훅, A2KBDA 이전 방식)
 │   ├── REMOTE_HELLO.BAS   # A2REMOTE.DSK의 HELLO (SSC 있으면 IN#2, 그다음 BRUN A2KBDA)
 │   ├── a2kbda.s / .bin    # A2KBDA: 키보드·SSC·카세트 입력에서 키를 받는 입력 드라이버 ($9300)
 │   ├── a2srv.s            # A2SRV: Disk II 섹터·메모리 덤프·RAM 검사를 SSC로 하는 6502 서버 (xa 문법)

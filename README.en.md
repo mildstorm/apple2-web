@@ -52,7 +52,7 @@
 * Saves the edited binary to the disk as a `[B]` file.
 
 #### 3. ⚙️ 6502 / 65C02 disassembler
-* A 6502/65C02 disassembler in plain JavaScript.
+* A 6502/65C02 disassembler that runs in the browser (`src/web/app.ts`, no external libraries).
 * **Address / Hex Bytes / Instruction / Comments** columns. The base address can be changed (default `$0800`; for a memory dump, the dump's start address).
 * **Apple II ROM symbols as comments**: `$FC58` HOME, `$FDED` COUT, `$FD0C` RDKEY, `$C000` KBD, `$C030` SPKR and more, plus branch targets.
 * Clicking a line jumps to that byte in the hex editor; an address search (`$FDED`, …) jumps straight there.
@@ -191,6 +191,33 @@ Pick the command for the Apple you connect to.
 Then open:
 👉 **http://localhost:3000**
 
+For disk images alone, with no Apple, `npm start` is enough: the server starts even when it cannot reach the SSC, and retries every 2 seconds.
+
+#### Server options
+Put options after `node dist/server.js` (e.g. `node dist/server.js --listen 0.0.0.0`). Through `npm start` they go after `--` (`npm start -- --listen 0.0.0.0`), but PowerShell drops a bare `--`, so quote it there: `npm start '--' --listen 0.0.0.0`.
+
+| Option | Default | Meaning |
+| :--- | :--- | :--- |
+| `--listen <address>` | `127.0.0.1` | Address the web server listens on. `0.0.0.0` for other devices (see Security below) |
+| `--serial <COM port>` | none | Real machine on a COM port; `tools/com_relay.py` relays it over TCP |
+| `--baud <speed>` | `9600` | Speed for `--serial` (same as the SSC DIP switches) |
+| `--rtscts` | off | Hardware flow control for `--serial` |
+| `--relay-port <port>` | `6502` | Local TCP port the `--serial` relay opens |
+| `--stm32` | off | Connect to the STM32 emulator board (default host `169.254.246.139`, port `6502`) |
+| `--host <address>` / `--port <port>` | `127.0.0.1` / `1977` | Where to reach the SSC over TCP (AppleWin, the board, a Wi-Fi modem) |
+| `--no-bridge` | off | No SSC (disk image work and audio keys only) |
+| `--audio-pc` | off | Play audio keys on the PC speaker even with `--stm32` |
+| `--notify` | off | Tell the Apple about saved files etc. with `*** [WEB NOTICE] ***` (off by default: the SSC is its keyboard) |
+
+| Environment variable | Meaning |
+| :--- | :--- |
+| `PORT` | Web server port (default `3000`) |
+| `LISTEN_HOST` | Same as `--listen` |
+| `SERIAL_PORT`, `SERIAL_BAUD` | Same as `--serial`, `--baud` |
+| `BRIDGE_HOST`, `BRIDGE_PORT` | SSC address; take precedence over `--host`, `--port` |
+| `BRIDGE_LOCAL_ADDR` | Fixed PC source address for a 169.254.x.x board |
+| `PYTHON` | Python command to use (default: whichever of `python3` / `python` / `py` is found) |
+
 > 🔒 **Security**: the server has no login, and the web keyboard can type anything on the Apple (`INIT`, `DELETE`, …). That is why it listens **on this PC only (127.0.0.1)** by default.
 > * To use it from other devices (your home network, Tailscale, …) pass `--listen 0.0.0.0` (or `--listen <that interface's address>`). Only do so on a network you trust; if the PC gets a public IP directly with no router, turn off Node.js's **Public** inbound rule in the Windows firewall.
 > * Requests whose Host header is not localhost (DNS rebinding) and POST/DELETE sent from other web sites (CSRF) are refused.
@@ -235,7 +262,7 @@ Details are in [How to Use 4](#4-a-keyboardless-real-apple-ii-from-the-web-and-v
 
 ### 3. Checking the result in AppleWin
 1. Mount `apple2-web.dsk` in AppleWin's drive 1.
-2. Press **`F2`** (or `Ctrl + F2`) to boot.
+2. Press **`F2`** to restart (boot) the emulator.
 3. Type **`CATALOG`** at the `]` prompt: the files added or changed on the web are there.
 4. `RUN name` or `BRUN name` runs them in the emulator.
 
@@ -388,6 +415,7 @@ A2SRV reads a whole track into `$6600-$85FF` first and sends it afterwards (so n
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
+| `GET` | `/api/status` | Server status and SSC bridge connection (JSON) |
 | `GET` | `/api/files` | All files on `apple2-web.dsk` (JSON) |
 | `GET` | `/api/files/:filename` | A BASIC file's source text |
 | `GET` | `/api/files/:filename?type=B` | A binary file's raw bytes as hex |
@@ -409,6 +437,7 @@ A2SRV reads a whole track into `$6600-$85FF` first and sends it afterwards (so n
 | `POST` | `/api/remote/diag` | `{ "lc": true, "rom": true }` start diagnostics (202) |
 | `GET` | `/api/remote/diag` | Last diagnostics result |
 | `POST` | `/api/remote/update-a2srv` | BSAVE the latest A2SRV to the drive 1 floppy and read it back to check (202) |
+| `POST` | `/api/upload/stm32` | Put `apple2-web.dsk` on the STM32 board's SD card as `A2WEB.DSK` (needs `sd-upload.ps1` in the sibling `../STM32CubeIDE` folder) |
 
 Add **`?disk=remote`** to the file APIs (`/api/files`, `/api/files/:filename`, `/api/download/dsk`) to use the disk read from the Apple instead (write APIs return 403 for it).
 
@@ -444,6 +473,29 @@ To connect a real Apple II's **Super Serial Card (slot 2)** to the PC, choose on
 
 ---
 
+## 🛠️ Development
+
+The server (`src/server/`) and the web UI script (`src/web/app.ts`) are TypeScript (strict). After a change, rebuild `dist/` with `npm run build` and restart the server. The web UI's HTML/CSS is in `public/index.html` and needs no build.
+
+### npm scripts
+| Command | What it does |
+| :--- | :--- |
+| `npm run build` | Compile the server and the web UI into `dist/` (also `build:server`, `build:web`). Fails on type errors |
+| `npm start` / `npm run start:stm32` | Run `dist/server.js` (AppleWin / STM32 board) |
+| `npm test` | Integration test (below) |
+| `npm run test:audio` | A2KBDA audio reception test (needs py65) |
+| `npm run remote:dump` / `remote:quit` | Read drive 1 / stop A2SRV from the command line (`dist/remote_disk.js`) |
+| `npm run build:a2srv` / `build:a2kbda` | Assemble the 6502 sources with `xa` |
+| `npm run build:remote-dsk` | Build `a2remote.dsk` for the real machine |
+| `npm run build:dsk` | Rebuild `apple2-web.dsk` from the template (HELLO, WEBCLIENT). ⚠️ Overwrites the current disk (no snapshot in `backups/`) |
+| `npm run upload:stm32` | Put `apple2-web.dsk` on the STM32 board's SD card |
+
+### Tests
+* **`npm test`**: opens a mock SSC (TCP 19770), starts `dist/server.js` on HTTP 3999 and checks the bridge connection, the `/api/files` catalog, that a foreign Host header and a cross-site POST are refused (403), `/api/remote/status`, and that web keyboard input (`CATALOG` + RETURN, Ctrl-C) arrives on the SSC. Its ports are its own, so a running server or AppleWin is not disturbed, and nothing is written to the disk. The catalog check needs Python and Java; run `npm run build` first.
+* **`npm run test:audio`**: decodes the WAV from `dist/audio_keys.js` with A2KBDA in the py65 6502 simulator (see "Audio packet format" under How to Use 4, ③-1).
+
+---
+
 ## 📂 Directory Structure
 
 ```
@@ -451,7 +503,7 @@ apple2-web/
 ├── backups/               # automatic disk snapshots (timestamped .dsk, for rollback)
 ├── apple2/
 │   ├── HELLO.BAS          # DOS 3.3 boot greeting program source
-│   ├── WEBCLIENT.BAS      # Apple II SSC web client & bridge source
+│   ├── WEBCLIENT.BAS      # dual console: keyboard and SSC both as input ($0300 hook, before A2KBDA)
 │   ├── REMOTE_HELLO.BAS   # A2REMOTE.DSK's HELLO (IN#2 if there is an SSC, then BRUN A2KBDA)
 │   ├── a2kbda.s / .bin    # A2KBDA: input driver taking keys from keyboard, SSC, cassette input ($9300)
 │   ├── a2srv.s            # A2SRV: 6502 server for Disk II sectors, memory dumps, RAM tests over the SSC (xa syntax)
