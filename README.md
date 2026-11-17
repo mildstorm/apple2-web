@@ -101,7 +101,7 @@
 #### 10. 🔌 연결 방식
 | 대상 | 연결 | 실행 |
 | :--- | :--- | :--- |
-| Apple II 실기 | SSC ─ 널 모뎀 케이블 ─ USB-RS232 ─ PC COM 포트 (Python 릴레이) | `node server.js --serial COM12 --baud 9600` |
+| Apple II 실기 | SSC ─ 널 모뎀 케이블 ─ USB-RS232 ─ PC COM 포트 (Python 릴레이) | `node dist/server.js --serial COM12 --baud 9600` |
 | Apple II 실기, 오디오 키 입력 | PC 이어폰/라인 출력 ─ 3.5mm 케이블 ─ 카세트 IN | (어느 모드든, 전송: `🔊 오디오`) |
 | STM32F769I-DISCO Apple //e 에뮬레이터 | RJ45 직결, 보드 TCP 6502 = SSC, TCP 6503 = 카세트 입력 | `npm run start:stm32` |
 | AppleWin | SSC TCP 소켓 1977 | `npm start` |
@@ -119,7 +119,7 @@
 * **//c 미지원**: SSC 슬롯이 없는 //c(내장 시리얼 포트)는 시험하지 않았습니다. //c에는 카세트 단자도 없어 오디오 입력도 쓸 수 없습니다.
 * **오디오는 한 방향**: 오디오로는 키 입력(PC → Apple)만 됩니다. 디스켓 보기·덤프·진단(Apple → PC)은 SSC가 필요합니다. 오디오는 받았다는 확인이 없어서, 잘못 받은 패킷은 Apple이 삐 소리를 내고 버립니다(다시 보내세요). Apple이 명령을 실행하느라 키를 기다리지 않는 동안 온 소리는 사라집니다.
 * **오디오 검증 범위**: A2KBDA의 디코딩은 ① py65 6502 시뮬레이터(실제 WAV를 사이클 단위로, `npm run test:audio`)와 ② STM32 보드의 카세트 입력(TCP 6503, 사이클 정확 6502에서 실제 A2KBDA 실행)에서 확인했습니다. 보드에서 7패킷 1.5KB 프로그램이 한 글자도 틀리지 않았고 손상 패킷은 버려졌습니다. PC 사운드 카드 → 케이블 → 실기 카세트 회로의 **아날로그 구간은 실기에서 확인해야** 합니다.
-* **실기 미시험**: STM32 에뮬레이터에서 모두 확인했지만 실기에서는 아직 시험 전입니다. 글자가 빠지면 `remote_disk.js` 의 입력 간격(실기: 글자 2ms, 줄 400ms)을 늘리세요.
+* **실기 미시험**: STM32 에뮬레이터에서 모두 확인했지만 실기에서는 아직 시험 전입니다. 글자가 빠지면 `src/server/server.ts` 가 `RemoteDisk` 에 주는 입력 간격(실기: 글자 2ms, 줄 400ms)을 늘리세요.
 
 ---
 
@@ -133,13 +133,13 @@
  │ 🧪 메모리 덤프 · 진단 · 디스켓 A2SRV 갱신                      │
  └───────────────────────────┬──────────────────────────────────┘
                              │ REST (127.0.0.1)
- Node.js server.js ──────────┴───────────────────────────────────────────┐
+ Node.js server.ts ──────────┴───────────────────────────────────────────┐
  │  /api/files ── ac_tool.py ── AppleCommander ── apple2-web.dsk (로컬)    │
  │                                            └── remote/drive1.dsk (사본) │
- │  /api/remote/* ── remote_disk.js (타이핑, A2SRV 실행, 4&4/6&2 디코딩,   │
+ │  /api/remote/* ── remote_disk.ts (타이핑, A2SRV 실행, 4&4/6&2 디코딩,   │
  │                   메모리 덤프, RAM 검사)                                │
- │                 └ audio_keys.js (키 → 카세트 패킷)                      │
- │                       │ bridge.js (TCP 바이트 스트림)                   │
+ │                 └ audio_keys.ts (키 → 카세트 패킷)                      │
+ │                       │ bridge.ts (TCP 바이트 스트림)                   │
  └───────────────────────┼─────────────────────────────────────────────────┘
           ┌──────────────┼──────────────────────┬─────────────────────┐
           ▼              ▼                      ▼                     ▼
@@ -147,7 +147,7 @@
   (pyserial) ─ COMx      │  (+ TCP 6503 카세트 입력)
           │              ▼                      ▼
           ▼        에뮬레이터 //e SSC      AppleWin SSC
-   실기 Apple II SSC (슬롯 2)        audio_keys.js ─ PC 소리 출력 ─┐
+   실기 Apple II SSC (슬롯 2)        audio_keys.ts ─ PC 소리 출력 ─┐
           │                                                          ▼
           │                                       실기 카세트 IN ($C060)
           │  A2REMOTE.DSK 부팅: HELLO → (SSC면 IN#2) → BRUN A2KBDA
@@ -169,12 +169,14 @@
 * **py65** (오디오 수신 시뮬레이션 시험 `npm run test:audio` 때만): `python -m pip install py65`
 * **xa** 6502 어셈블러 (A2SRV를 고칠 때만, MSYS2 `pacman -S mingw-w64-ucrt-x86_64-xa`)
 
-### 2. 저장소 복제 및 의존성 설치
+### 2. 저장소 복제, 의존성 설치, 빌드
 ```bash
 git clone https://github.com/mildstorm/apple2-web.git
 cd apple2-web
 npm install
+npm run build
 ```
+서버와 웹 UI는 TypeScript(`src/`)로 작성되어 있고, `npm run build` 가 `dist/` 로 컴파일합니다(`dist/server.js` 등 Node용, `dist/web/app.js` 브라우저용). `npm start` 와 아래 `node dist/...` 명령은 이 빌드 결과물을 실행하므로, `src/` 를 고쳤거나 `git pull` 한 뒤에는 `npm run build` 를 다시 실행하세요.
 
 ### 3. 서버 실행
 연결할 Apple에 따라 실행 방법을 고릅니다.
@@ -183,7 +185,7 @@ npm install
 | :--- | :--- | :--- |
 | AppleWin (기본) | `npm start` | `127.0.0.1:1977` |
 | STM32 에뮬레이터 | `npm run start:stm32` | 보드 `169.254.246.139:6502` (RJ45 직결) |
-| Apple II 실기 | `node server.js --serial COM12 --baud 9600` | USB-RS232 + 널 모뎀 → SSC 슬롯 2 |
+| Apple II 실기 | `node dist/server.js --serial COM12 --baud 9600` | USB-RS232 + 널 모뎀 → SSC 슬롯 2 |
 
 서버가 기동되면 웹 브라우저에서 아래 주소로 접속합니다:
 👉 **http://localhost:3000**
@@ -194,7 +196,7 @@ npm install
 
 ### 4. 키보드 없는 실기를 웹으로 쓰기 (요약)
 1. `npm run build:remote-dsk` 로 만든 `a2remote.dsk` 를 디스켓에 기록해 실기에 넣고 부팅 → SSC와 카세트 입력이 키보드가 됩니다.
-2. `node server.js --serial COMx --baud 9600` 실행 후 브라우저 접속.
+2. `node dist/server.js --serial COMx --baud 9600` 실행 후 브라우저 접속.
 3. `⌨️ Apple 키보드` 칸에 `CATALOG`, `RUN 이름`, BASIC 줄, `SAVE 이름` 등을 입력하고 Enter (전송: SSC 또는 🔊 오디오).
 4. `[📡 Apple에서 읽기]` 로 실기 드라이브 1의 파일 목록을 갱신하고, 파일을 눌러 BASIC 소스·Hex·디스어셈블리로 확인.
 5. `[🧪 메모리/진단]` 으로 ROM/메모리를 PC 파일로 덤프하거나, RAM·ROM 상태를 진단.
@@ -273,7 +275,7 @@ npm run build:remote-dsk
 python -m pip install pyserial
 ```
 ```bash
-node server.js --serial COM12 --baud 9600
+node dist/server.js --serial COM12 --baud 9600
 ```
 COM 포트 이름은 `python tools/com_relay.py --list` 로 확인합니다. 서버가 `tools/com_relay.py` 를 띄워 COM 포트를 `127.0.0.1:6502` 로 중계하고 그곳에 접속합니다 (하드웨어 흐름 제어가 필요하면 `--rtscts`).
 
@@ -285,9 +287,9 @@ COM 포트 이름은 `python tools/com_relay.py --list` 로 확인합니다. 서
 ```
 * Apple ][+ / //e 뒷면의 **카세트 IN**(입력) 단자에 연결합니다(OUT 아님). PC 볼륨은 **최대 근처**로, 효과음·음량 평준화 같은 소리 효과는 끕니다.
 * 웹의 `전송` 을 `🔊 오디오` 로 바꾸고 명령을 입력합니다. PC가 약 0.3초(짧은 명령) 소리를 냅니다. Windows는 Python 기본 모듈 `winsound` 로 재생하므로 추가 설치가 없습니다.
-* 소리를 다른 기기로 내려면 `🔊 WAV` 로 파일을 받거나 `GET /api/remote/audio.wav?text=CATALOG` 를 씁니다. 명령줄에서는 `node audio_keys.js play "CATALOG"` / `node audio_keys.js wav "CATALOG" out.wav` 입니다.
-* 오디오만 쓸 때는 SSC 없이 `node server.js --no-bridge` 로 띄워도 됩니다(디스켓 보기·덤프·진단은 SSC가 있어야 함).
-* **STM32 보드에서는 소리 대신 신호를 직접 보냅니다**: `--stm32` 로 실행하면 `🔊 오디오` 전송이 PC 스피커로 재생하지 않고, 같은 반주기 길이를 보드의 **카세트 입력 포트 TCP 6503** 으로 보냅니다. 보드 펌웨어가 이것을 에뮬레이트된 CPU 사이클에 맞춰 `$C060` bit 7로 바꿉니다(STM32 프로젝트 `applem-core/src/core/input/cassette_input.hpp`). 그래서 케이블 없이 A2KBDA의 오디오 수신을 보드에서 시험할 수 있습니다. 보드여도 스피커로 내려면 `--audio-pc` 를 붙입니다. 명령줄로는 `node audio_keys.js board "CATALOG"` 입니다.
+* 소리를 다른 기기로 내려면 `🔊 WAV` 로 파일을 받거나 `GET /api/remote/audio.wav?text=CATALOG` 를 씁니다. 명령줄에서는 `node dist/audio_keys.js play "CATALOG"` / `node dist/audio_keys.js wav "CATALOG" out.wav` 입니다.
+* 오디오만 쓸 때는 SSC 없이 `node dist/server.js --no-bridge` 로 띄워도 됩니다(디스켓 보기·덤프·진단은 SSC가 있어야 함).
+* **STM32 보드에서는 소리 대신 신호를 직접 보냅니다**: `--stm32` 로 실행하면 `🔊 오디오` 전송이 PC 스피커로 재생하지 않고, 같은 반주기 길이를 보드의 **카세트 입력 포트 TCP 6503** 으로 보냅니다. 보드 펌웨어가 이것을 에뮬레이트된 CPU 사이클에 맞춰 `$C060` bit 7로 바꿉니다(STM32 프로젝트 `applem-core/src/core/input/cassette_input.hpp`). 그래서 케이블 없이 A2KBDA의 오디오 수신을 보드에서 시험할 수 있습니다. 보드여도 스피커로 내려면 `--audio-pc` 를 붙입니다. 명령줄로는 `node dist/audio_keys.js board "CATALOG"` 입니다.
 
 **오디오 패킷 형식** (사각파 반주기, A2KBDA가 14사이클 루프 횟수로 잼)
 
@@ -356,10 +358,10 @@ npm run start:stm32
 
 명령줄 도구:
 ```bash
-node remote_disk.js type CATALOG
+node dist/remote_disk.js type CATALOG
 ```
 ```bash
-node remote_disk.js dump remote/drive1.dsk
+node dist/remote_disk.js dump remote/drive1.dsk
 ```
 `--host/--port` 로 대상(기본 `169.254.246.139:6502`), `--baud 9600` 으로 실기 속도, `--full` 로 35트랙 전체를 지정합니다. PC에 169.254 대역 인터페이스가 여럿이면 `BRIDGE_LOCAL_ADDR` 환경 변수로 소스 주소를 고정합니다.
 
@@ -428,7 +430,7 @@ Apple II 실기의 **Super Serial Card (Slot 2)**와 PC를 통신 브릿지로 �
    * SSC 카드 가운데 점퍼 블록의 화살표를 **`TERMINAL`** 방향으로 꽂고 널 모뎀 케이블을 연결합니다.
 3. **서버 실행 명령** (pyserial 필요: `python -m pip install pyserial`):
    ```bash
-   node server.js --serial COM3 --baud 9600
+   node dist/server.js --serial COM3 --baud 9600
    ```
    자세한 사용법은 위의 [사용 가이드 4. A2REMOTE.DSK](#4-키보드-없는-apple-ii-실기를-웹으로-조작하고-디스크-보기-a2remotedsk) 참고.
 
@@ -437,7 +439,7 @@ Apple II 실기의 **Super Serial Card (Slot 2)**와 PC를 통신 브릿지로 �
 [Apple II 실기 SSC (DB-25)] ──> [RetroWiFiModem / WiModem232 (ESP8266)] ──> 📶 [가정용 Wi-Fi] ──> [PC Node.js 서버]
 ```
 1. Apple II 뒷면 DB-25 포트에 **RetroWiFiModem** 또는 **WiModem232** 동글을 직접 꽂습니다.
-2. 모뎀을 홈 Wi-Fi에 연결하고, 모뎀이 TCP 서버(수신 대기) 모드로 SSC의 바이트를 그대로 넘기도록 설정한 뒤 `node server.js --host <모뎀 IP> --port <포트>` 로 접속합니다. (이 방식은 아직 시험하지 않았습니다. 모뎀이 AT 명령/텔넷 협상을 끼워 넣지 않는 투명 모드여야 A2SRV 통신이 됩니다.)
+2. 모뎀을 홈 Wi-Fi에 연결하고, 모뎀이 TCP 서버(수신 대기) 모드로 SSC의 바이트를 그대로 넘기도록 설정한 뒤 `node dist/server.js --host <모뎀 IP> --port <포트>` 로 접속합니다. (이 방식은 아직 시험하지 않았습니다. 모뎀이 AT 명령/텔넷 협상을 끼워 넣지 않는 투명 모드여야 A2SRV 통신이 됩니다.)
 
 ---
 
@@ -457,7 +459,17 @@ apple2-web/
 │   ├── drive1.dsk         #   드라이브 1 디스켓 사본
 │   └── dumps/             #   메모리/ROM 덤프 *.bin
 ├── public/
-│   └── index.html         # 웹 UI: 파일 목록, BASIC, Hex, 디스어셈블러, 원격 키보드, 메모리/진단
+│   └── index.html         # 웹 UI 페이지 (HTML/CSS). 스크립트는 빌드된 app.js를 불러옴
+├── src/                   # TypeScript 소스 (npm run build → dist/)
+│   ├── server/            #   Node.js 쪽 (tsconfig.json: CommonJS → dist/*.js)
+│   │   ├── server.ts      #     Express 서버: DOS 3.3 파일 API, 백업/롤백, 원격(/api/remote/*), 접근 제한
+│   │   ├── bridge.ts      #     Apple II SSC <-> TCP/시리얼 브릿지 모듈
+│   │   ├── remote_disk.ts #     SSC 원격 타이핑, A2SRV 실행, 4&4/6&2 디코딩, 메모리 덤프, RAM 진단 (CLI 겸용)
+│   │   ├── audio_keys.ts  #     오디오 키 입력: 텍스트 → 카세트 패킷 WAV, PC 소리 재생 또는 STM32 TCP 6503 (CLI 겸용)
+│   │   └── test_runner.ts #     통합 시험 (npm test)
+│   └── web/
+│       └── app.ts         #   웹 UI 스크립트: 파일 목록, BASIC, Hex, 디스어셈블러, 원격 키보드, 메모리/진단 (→ dist/web/app.js)
+├── dist/                  # (git 제외) 빌드 결과물: npm start / node dist/... 가 실행하는 파일
 ├── tools/
 │   ├── AppleCommander.jar # AppleCommander DOS 3.3 디스크 처리 엔진
 │   ├── com_relay.py       # 실기 COM 포트 ↔ TCP 중계 (pyserial)
@@ -467,12 +479,9 @@ apple2-web/
 ├── build_dsk.py           # Applesoft BASIC 토크나이저 및 DSK 이미지 빌더
 ├── build_remote_dsk.py    # 실기 부팅용 a2remote.dsk 빌더 (HELLO + A2SRV + A2KBDA)
 ├── a2remote.dsk           # 실기 부팅용 원격 키보드 디스크
-├── bridge.js              # Apple II SSC <-> TCP/시리얼 브릿지 모듈
-├── remote_disk.js         # SSC 원격 타이핑, A2SRV 실행, 4&4/6&2 디코딩, 메모리 덤프, RAM 진단 (CLI 겸용)
-├── audio_keys.js          # 오디오 키 입력: 텍스트 → 카세트 패킷 WAV, PC 소리 재생 또는 STM32 TCP 6503 (CLI 겸용)
-├── server.js              # Express 서버: DOS 3.3 파일 API, 백업/롤백, 원격(/api/remote/*), 접근 제한
 ├── apple2-web.dsk         # 부팅 가능한 실시간 Apple II DOS 3.3 디스크 이미지
-├── package.json           # Node.js 프로젝트 설정 및 의존성
+├── package.json           # Node.js 프로젝트 설정, 의존성, 빌드/실행 스크립트
+├── tsconfig.base.json     # src/server, src/web 의 tsconfig.json 이 공유하는 TypeScript 설정 (strict)
 ├── README.md              # 프로젝트 안내 문서 (한국어)
 └── README.en.md           # 프로젝트 안내 문서 (영어)
 ```

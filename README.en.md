@@ -101,7 +101,7 @@ Built for a real machine with a broken keyboard. Boot it from **`A2REMOTE.DSK`**
 #### 10. 🔌 Connections
 | Target | Connection | Run |
 | :--- | :--- | :--- |
-| Real Apple II | SSC ─ null modem cable ─ USB-RS232 ─ PC COM port (Python relay) | `node server.js --serial COM12 --baud 9600` |
+| Real Apple II | SSC ─ null modem cable ─ USB-RS232 ─ PC COM port (Python relay) | `node dist/server.js --serial COM12 --baud 9600` |
 | Real Apple II, audio keys | PC headphone/line out ─ 3.5 mm cable ─ cassette IN | (any mode; send: `🔊 audio`) |
 | STM32F769I-DISCO Apple //e emulator | Direct RJ45, board TCP 6502 = SSC, TCP 6503 = cassette input | `npm run start:stm32` |
 | AppleWin | SSC TCP socket 1977 | `npm start` |
@@ -119,7 +119,7 @@ Built for a real machine with a broken keyboard. Boot it from **`A2REMOTE.DSK`**
 * **No //c**: the //c (no SSC slot, a built-in serial port) has not been tried. It has no cassette jack either, so audio keys cannot work on it.
 * **Audio is one way**: audio carries keys (PC → Apple) only. Floppy reading, dumps and diagnostics (Apple → PC) need the SSC. Audio has no acknowledgement: a packet received wrongly is dropped with a beep (send it again), and sound that arrives while the Apple is busy running a command, not waiting for a key, is lost.
 * **What audio has been checked on**: A2KBDA's decoding was checked ① in the py65 6502 simulator (the real WAV fed cycle by cycle, `npm run test:audio`) and ② on the STM32 board's cassette input (TCP 6503, the real A2KBDA on a cycle-accurate 6502): a 7-packet, 1.5 KB program arrived without a single wrong character and a damaged packet was dropped. The **analog part** — PC sound card → cable → the real machine's cassette circuit — still has to be tried on a real machine.
-* **Not yet tried on real hardware**: everything was verified on the STM32 emulator, not yet on a real machine. If characters go missing, increase the typing delays in `remote_disk.js` (real machine: 2 ms per character, 400 ms per line).
+* **Not yet tried on real hardware**: everything was verified on the STM32 emulator, not yet on a real machine. If characters go missing, increase the typing delays `src/server/server.ts` gives `RemoteDisk` (real machine: 2 ms per character, 400 ms per line).
 
 ---
 
@@ -133,13 +133,13 @@ Built for a real machine with a broken keyboard. Boot it from **`A2REMOTE.DSK`**
  │ 🧪 Memory dump · diagnostics · floppy A2SRV update             │
  └───────────────────────────┬──────────────────────────────────┘
                              │ REST (127.0.0.1)
- Node.js server.js ──────────┴───────────────────────────────────────────┐
+ Node.js server.ts ──────────┴───────────────────────────────────────────┐
  │  /api/files ── ac_tool.py ── AppleCommander ── apple2-web.dsk (local)   │
  │                                            └── remote/drive1.dsk (copy) │
- │  /api/remote/* ── remote_disk.js (typing, A2SRV, 4&4/6&2 decoding,      │
+ │  /api/remote/* ── remote_disk.ts (typing, A2SRV, 4&4/6&2 decoding,      │
  │                   memory dump, RAM test)                                │
- │                 └ audio_keys.js (keys as cassette packets)              │
- │                       │ bridge.js (TCP byte stream)                     │
+ │                 └ audio_keys.ts (keys as cassette packets)              │
+ │                       │ bridge.ts (TCP byte stream)                     │
  └───────────────────────┼─────────────────────────────────────────────────┘
           ┌──────────────┼──────────────────────┬─────────────────────┐
           ▼              ▼                      ▼                     ▼
@@ -147,7 +147,7 @@ Built for a real machine with a broken keyboard. Boot it from **`A2REMOTE.DSK`**
   (pyserial) ─ COMx      │  (+ TCP 6503 cassette input)
           │              ▼                      ▼
           ▼        emulated //e SSC       AppleWin SSC
-   Real Apple II SSC (slot 2)        audio_keys.js ─ PC sound out ─┐
+   Real Apple II SSC (slot 2)        audio_keys.ts ─ PC sound out ─┐
           │                                                         ▼
           │                                   real cassette IN ($C060)
           │  A2REMOTE.DSK boot: HELLO → (IN#2 if SSC) → BRUN A2KBDA
@@ -170,12 +170,14 @@ Built for a real machine with a broken keyboard. Boot it from **`A2REMOTE.DSK`**
 * **py65** (only for the audio simulation test `npm run test:audio`): `python -m pip install py65`
 * **xa** 6502 assembler (only to change A2SRV/A2KBDA; MSYS2 `pacman -S mingw-w64-ucrt-x86_64-xa`)
 
-### 2. Clone and install
+### 2. Clone, install and build
 ```bash
 git clone https://github.com/mildstorm/apple2-web.git
 cd apple2-web
 npm install
+npm run build
 ```
+The server and the web UI are written in TypeScript (`src/`); `npm run build` compiles them into `dist/` (`dist/server.js` and the other Node modules, `dist/web/app.js` for the browser). `npm start` and the `node dist/...` commands below run that build output, so run `npm run build` again after changing `src/` or after a `git pull`.
 
 ### 3. Start the server
 Pick the command for the Apple you connect to.
@@ -184,7 +186,7 @@ Pick the command for the Apple you connect to.
 | :--- | :--- | :--- |
 | AppleWin (default) | `npm start` | `127.0.0.1:1977` |
 | STM32 emulator | `npm run start:stm32` | board `169.254.246.139:6502` (direct RJ45) |
-| Real Apple II | `node server.js --serial COM12 --baud 9600` | USB-RS232 + null modem → SSC slot 2 |
+| Real Apple II | `node dist/server.js --serial COM12 --baud 9600` | USB-RS232 + null modem → SSC slot 2 |
 
 Then open:
 👉 **http://localhost:3000**
@@ -195,7 +197,7 @@ Then open:
 
 ### 4. Using a keyboardless real machine from the web (summary)
 1. Write the `a2remote.dsk` made by `npm run build:remote-dsk` to a floppy and boot the real machine from it → the SSC and the cassette input become its keyboard.
-2. Run `node server.js --serial COMx --baud 9600` and open the browser.
+2. Run `node dist/server.js --serial COMx --baud 9600` and open the browser.
 3. Type `CATALOG`, `RUN name`, BASIC lines, `SAVE name` … into `⌨️ Apple keyboard` and press Enter (send: SSC or 🔊 audio).
 4. `[📡 Read from Apple]` refreshes the file list of drive 1; click a file for its BASIC source, hex and disassembly.
 5. `[🧪 Memory/Diagnostics]` dumps ROM/memory to files on the PC or checks RAM and ROM.
@@ -274,7 +276,7 @@ Once that floppy exists, later A2SRV updates are done by the machine itself from
 python -m pip install pyserial
 ```
 ```bash
-node server.js --serial COM12 --baud 9600
+node dist/server.js --serial COM12 --baud 9600
 ```
 `python tools/com_relay.py --list` shows the COM port names. The server starts `tools/com_relay.py`, which relays the COM port to `127.0.0.1:6502`, and connects there (`--rtscts` for hardware flow control).
 
@@ -286,9 +288,9 @@ node server.js --serial COM12 --baud 9600
 ```
 * Use the **cassette IN** (input) jack on the back of a ][+ / //e, not OUT. Set the PC volume **near maximum** and turn off sound effects such as loudness equalization.
 * Switch `send` on the page to `🔊 audio` and type a command. The PC plays about 0.3 s of sound (for a short command). On Windows it is played with Python's built-in `winsound`, so nothing needs installing.
-* To play the sound from another device, save it with `🔊 WAV` or `GET /api/remote/audio.wav?text=CATALOG`. On the command line: `node audio_keys.js play "CATALOG"` / `node audio_keys.js wav "CATALOG" out.wav`.
-* With audio only, the server can run with no SSC at all: `node server.js --no-bridge` (floppy reading, dumps and diagnostics need the SSC).
-* **On the STM32 board the signal goes in directly, not as sound**: with `--stm32`, `🔊 audio` does not play on the PC speaker; the same half-cycle lengths go to the board's **cassette input port, TCP 6503**, and the firmware turns them into `$C060` bit 7 on the emulated CPU's cycles (STM32 project, `applem-core/src/core/input/cassette_input.hpp`). That tests A2KBDA's audio reception on the board without a cable. Add `--audio-pc` to use the speaker even then. On the command line: `node audio_keys.js board "CATALOG"`.
+* To play the sound from another device, save it with `🔊 WAV` or `GET /api/remote/audio.wav?text=CATALOG`. On the command line: `node dist/audio_keys.js play "CATALOG"` / `node dist/audio_keys.js wav "CATALOG" out.wav`.
+* With audio only, the server can run with no SSC at all: `node dist/server.js --no-bridge` (floppy reading, dumps and diagnostics need the SSC).
+* **On the STM32 board the signal goes in directly, not as sound**: with `--stm32`, `🔊 audio` does not play on the PC speaker; the same half-cycle lengths go to the board's **cassette input port, TCP 6503**, and the firmware turns them into `$C060` bit 7 on the emulated CPU's cycles (STM32 project, `applem-core/src/core/input/cassette_input.hpp`). That tests A2KBDA's audio reception on the board without a cable. Add `--audio-pc` to use the speaker even then. On the command line: `node dist/audio_keys.js board "CATALOG"`.
 
 **Audio packet format** (square-wave half cycles; A2KBDA measures them in 14-cycle loop counts)
 
@@ -357,10 +359,10 @@ npm run start:stm32
 
 Command-line tools:
 ```bash
-node remote_disk.js type CATALOG
+node dist/remote_disk.js type CATALOG
 ```
 ```bash
-node remote_disk.js dump remote/drive1.dsk
+node dist/remote_disk.js dump remote/drive1.dsk
 ```
 `--host/--port` choose the target (default `169.254.246.139:6502`), `--baud 9600` a real machine's speed, `--full` all 35 tracks. If the PC has several 169.254.x.x interfaces, set the source address with the `BRIDGE_LOCAL_ADDR` environment variable.
 
@@ -429,7 +431,7 @@ To connect a real Apple II's **Super Serial Card (slot 2)** to the PC, choose on
    * Point the arrow of the jumper block in the middle of the SSC to **`TERMINAL`** and connect the null modem cable.
 3. **Start the server** (needs pyserial: `python -m pip install pyserial`):
    ```bash
-   node server.js --serial COM3 --baud 9600
+   node dist/server.js --serial COM3 --baud 9600
    ```
    See [How to Use 4. A2REMOTE.DSK](#4-a-keyboardless-real-apple-ii-from-the-web-and-viewing-its-disk-a2remotedsk) above for the rest.
 
@@ -438,7 +440,7 @@ To connect a real Apple II's **Super Serial Card (slot 2)** to the PC, choose on
 [Apple II SSC (DB-25)] ──> [RetroWiFiModem / WiModem232 (ESP8266)] ──> 📶 [home Wi-Fi] ──> [PC Node.js server]
 ```
 1. Plug a **RetroWiFiModem** or **WiModem232** dongle straight into the DB-25 port on the back of the Apple II.
-2. Join the modem to your Wi-Fi, set it to pass the SSC's bytes through as a TCP server (listening), then connect with `node server.js --host <modem IP> --port <port>`. (Not tried yet. The modem must be in a transparent mode that adds no AT commands or telnet negotiation, or A2SRV's traffic will not get through.)
+2. Join the modem to your Wi-Fi, set it to pass the SSC's bytes through as a TCP server (listening), then connect with `node dist/server.js --host <modem IP> --port <port>`. (Not tried yet. The modem must be in a transparent mode that adds no AT commands or telnet negotiation, or A2SRV's traffic will not get through.)
 
 ---
 
@@ -458,7 +460,17 @@ apple2-web/
 │   ├── drive1.dsk         #   copy of the drive 1 floppy
 │   └── dumps/             #   memory/ROM dumps *.bin
 ├── public/
-│   └── index.html         # web UI: files, BASIC, hex, disassembler, remote keyboard, memory/diagnostics
+│   └── index.html         # web UI page (HTML/CSS); loads the built app.js
+├── src/                   # TypeScript sources (npm run build → dist/)
+│   ├── server/            #   Node.js side (tsconfig.json: CommonJS → dist/*.js)
+│   │   ├── server.ts      #     Express server: DOS 3.3 file API, backup/rollback, remote (/api/remote/*), access limits
+│   │   ├── bridge.ts      #     Apple II SSC <-> TCP/serial bridge module
+│   │   ├── remote_disk.ts #     SSC typing, A2SRV, 4&4/6&2 decoding, memory dumps, RAM tests (also a CLI)
+│   │   ├── audio_keys.ts  #     audio keys: text → cassette packets as WAV, PC playback or STM32 TCP 6503 (also a CLI)
+│   │   └── test_runner.ts #     integration test (npm test)
+│   └── web/
+│       └── app.ts         #   web UI script: files, BASIC, hex, disassembler, remote keyboard, memory/diagnostics (→ dist/web/app.js)
+├── dist/                  # (not in git) build output: what npm start / node dist/... run
 ├── tools/
 │   ├── AppleCommander.jar # AppleCommander DOS 3.3 disk engine
 │   ├── com_relay.py       # real machine's COM port ↔ TCP relay (pyserial)
@@ -468,12 +480,9 @@ apple2-web/
 ├── build_dsk.py           # Applesoft BASIC tokenizer and DSK image builder
 ├── build_remote_dsk.py    # builds a2remote.dsk for the real machine (HELLO + A2SRV + A2KBDA)
 ├── a2remote.dsk           # boot disk for the real machine (remote keyboard)
-├── bridge.js              # Apple II SSC <-> TCP/serial bridge module
-├── remote_disk.js         # SSC typing, A2SRV, 4&4/6&2 decoding, memory dumps, RAM tests (also a CLI)
-├── audio_keys.js          # audio keys: text → cassette packets as WAV, PC playback or STM32 TCP 6503 (also a CLI)
-├── server.js              # Express server: DOS 3.3 file API, backup/rollback, remote (/api/remote/*), access limits
 ├── apple2-web.dsk         # bootable Apple II DOS 3.3 disk image
-├── package.json           # Node.js project settings and dependencies
+├── package.json           # Node.js project settings, dependencies, build/run scripts
+├── tsconfig.base.json     # TypeScript settings (strict) shared by src/server and src/web tsconfig.json
 ├── README.md              # documentation (Korean)
 └── README.en.md           # documentation (English)
 ```
