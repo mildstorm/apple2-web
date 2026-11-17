@@ -4,8 +4,9 @@
   "description": "Apple II DOS 3.3 Web Disk File Manager, 3-Column Hex Editor & 6502 Disassembler",
   "main": "dist/server.js",
   "scripts": {
-    "build": "npm run build:server",
+    "build": "npm run build:server && npm run build:web",
     "build:server": "tsc -p src/server",
+    "build:web": "tsc -p src/web",
     "start": "node dist/server.js",
     "start:stm32": "node dist/server.js --stm32",
     "remote:dump": "node dist/remote_disk.js dump",

@@ -1,0 +1,14 @@
+{
+  // Browser UI script -> dist/web/app.js, loaded by public/index.html as a
+  // classic script (no imports/exports: its functions are globals, so the
+  // HTML's onclick="..." attributes can call them).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../dist/web"
+  },
+  "include": ["*.ts"]
+}
