@@ -1,18 +1,21 @@
 /**
- * test_runner.js - Automated integration test for Apple2-Web bridge & server
+ * test_runner.ts - Automated integration test for Apple2-Web bridge & server
+ * (runs as dist/test_runner.js and starts dist/server.js)
  */
 
-const { spawn } = require('child_process');
-const net = require('net');
-const http = require('http');
+import { spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
+import * as net from 'net';
+import * as http from 'http';
+import * as path from 'path';
 
 console.log('[Test] Starting Apple2-Web Automated Verification...');
 
 // 1. Mock AppleWin SSC listener on port 1977
-let mockServer;
-let serverProc;
+let mockServer: net.Server | undefined;
+let serverProc: ChildProcess | undefined;
 
-function cleanup() {
+function cleanup(): void {
   if (mockServer) {
     try { mockServer.close(); } catch(e) {}
   }
@@ -24,7 +27,7 @@ function cleanup() {
 mockServer = net.createServer((sock) => {
   console.log('[Mock AppleWin] SSC TCP Connection Accepted on 1977!');
 
-  sock.on('data', (buf) => {
+  sock.on('data', (buf: Buffer) => {
     const text = buf.toString('ascii');
     if (text.includes('APPLE //e NODE.JS WEB BRIDGE')) {
       console.log('[PASS 1] Welcome banner received from bridge.');
@@ -67,9 +70,10 @@ mockServer = net.createServer((sock) => {
 
 mockServer.listen(1977, '127.0.0.1', () => {
   console.log('[Mock AppleWin] Port 1977 listening. Spawning server.js...');
-  serverProc = spawn('node', ['server.js'], { stdio: 'inherit' });
+  const proc = spawn('node', [path.join(__dirname, 'server.js')], { stdio: 'inherit' });
+  serverProc = proc;
 
-  serverProc.on('error', (err) => {
+  proc.on('error', (err) => {
     console.error('[FAIL] Failed to spawn server.js:', err);
     cleanup();
     process.exit(1);

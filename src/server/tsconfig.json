@@ -1,0 +1,13 @@
+{
+  // Node.js server and command-line tools -> dist/*.js (CommonJS)
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2023"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "../../dist"
+  },
+  "include": ["*.ts"]
+}

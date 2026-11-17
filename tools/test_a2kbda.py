@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 test_a2kbda.py - Run A2KBDA (apple2/a2kbda.bin) in the py65 6502 simulator
-and feed it the sound audio_keys.js makes, cycle by cycle, on $C060.
+and feed it the sound audio_keys makes, cycle by cycle, on $C060.
 
-For each case a WAV is made by node audio_keys.js, its samples become the
+For each case a WAV is made by node dist/audio_keys.js (src/server/audio_keys.ts,
+built by npm run build), its samples become the
 cassette input level at the CPU's cycle time, and KIN (the KSW routine) is
 called the way RDKEY does until the expected text comes back - or a timeout.
 
@@ -34,7 +35,7 @@ def make_wav(text, gap=None):
     os.close(fd)
     code = ("const a=require(process.argv[1]);const o=process.argv[4]?{gap:+process.argv[4]}:{};"
             "require('fs').writeFileSync(process.argv[3],a.textToWav(process.argv[2],o).wav)")
-    args = ["node", "-e", code, os.path.join(ROOT, "audio_keys.js"), text, path]
+    args = ["node", "-e", code, os.path.join(ROOT, "dist", "audio_keys.js"), text, path]
     if gap is not None:
         args.append(str(gap))
     subprocess.run(args, check=True)

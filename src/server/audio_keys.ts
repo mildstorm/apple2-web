@@ -1,5 +1,5 @@
 /**
- * audio_keys.js - Type on the Apple II through its cassette input
+ * audio_keys.ts - Type on the Apple II through its cassette input
  *
  * The Apple runs apple2/a2kbda.bin (the A2REMOTE disk's HELLO loads it), which
  * reads keys from the cassette port while BASIC/DOS waits for input. This
@@ -16,29 +16,50 @@
  * Up to 255 bytes a packet; A2KBDA buffers a packet, so all its lines arrive
  * even while the Apple is busy with the first one.
  *
- * Command line:
- *   node audio_keys.js play "CATALOG"         play it now
- *   node audio_keys.js wav  "CATALOG" out.wav write the sound to a file
+ * Command line (after npm run build):
+ *   node dist/audio_keys.js play "CATALOG"         play it now
+ *   node dist/audio_keys.js wav  "CATALOG" out.wav write the sound to a file
  */
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { execFile } = require('child_process');
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as net from 'net';
+import { execFile } from 'child_process';
+import { SerialBridge } from './bridge.js';
 
-const RATE = 44100;
+export const RATE = 44100;
 const HALF = { leader: 833e-6, sync1: 150e-6, sync2: 250e-6, zero: 250e-6, one: 500e-6 };
 const LEADER_HALVES = 200;
 const MAX_PACKET = 255;
 
+export interface BoardTarget {
+  host: string;
+  port?: number;
+}
+
+export interface AudioOptions {
+  /** end the last line with RETURN (default true) */
+  enter?: boolean;
+  /** seconds of silence between packets (default 1.5) */
+  gap?: number;
+  /** send to the STM32 board's cassette port instead of the PC speaker */
+  board?: BoardTarget | null;
+}
+
+export interface AudioResult {
+  seconds: number;
+  packets: number;
+}
+
 /** The half-cycle durations (seconds) of one packet carrying `bytes`. */
-function packetHalves(bytes) {
+export function packetHalves(bytes: Uint8Array): number[] {
   if (bytes.length < 1 || bytes.length > MAX_PACKET) throw new Error(`packet of ${bytes.length} bytes (1-${MAX_PACKET})`);
-  const halves = [];
+  const halves: number[] = [];
   for (let i = 0; i < LEADER_HALVES; i++) halves.push(HALF.leader);
   halves.push(HALF.sync1, HALF.sync2);
   let chk = 0xA5 ^ bytes.length;
-  const putByte = (b) => {
+  const putByte = (b: number) => {
     for (let bit = 7; bit >= 0; bit--) {
       const h = (b >> bit) & 1 ? HALF.one : HALF.zero;
       halves.push(h, h);
@@ -59,7 +80,7 @@ function packetHalves(bytes) {
  * boundary (times kept exact, samples rounded), then silence.
  * opts.amplitude 0-127 (default 115), opts.silence seconds before/after.
  */
-function halvesToPcm(halves, opts = {}) {
+export function halvesToPcm(halves: number[], opts: { amplitude?: number; silence?: number } = {}): Buffer {
   const amp = opts.amplitude == null ? 115 : opts.amplitude;
   const pad = Math.round((opts.silence == null ? 0.05 : opts.silence) * RATE);
   const total = halves.reduce((a, b) => a + b, 0);
@@ -83,7 +104,7 @@ function halvesToPcm(halves, opts = {}) {
   return pcm;
 }
 
-function wavFile(pcm) {
+export function wavFile(pcm: Buffer): Buffer {
   const h = Buffer.alloc(44);
   h.write('RIFF', 0);
   h.writeUInt32LE(36 + pcm.length, 4);
@@ -106,14 +127,14 @@ function wavFile(pcm) {
  * with RETURN unless `enter` is false. Lines are packed into packets of up to
  * 255 bytes without splitting a line where possible.
  */
-function textToPackets(text, { enter = true } = {}) {
+export function textToPackets(text: string, { enter = true }: AudioOptions = {}): Buffer[] {
   const lines = String(text).replace(/\r\n|\n/g, '\r').split('\r');
   const chunks = lines.map((l, i) => {
     const last = i === lines.length - 1;
     return Buffer.from(l.replace(/[^\x00-\x7f]/g, '') + (last && !enter ? '' : '\r'), 'latin1');
   }).filter((b) => b.length > 0);
-  const packets = [];
-  let cur = [];
+  const packets: Buffer[] = [];
+  let cur: Buffer[] = [];
   let size = 0;
   for (let c of chunks) {
     while (c.length > MAX_PACKET) {
@@ -130,7 +151,7 @@ function textToPackets(text, { enter = true } = {}) {
 }
 
 /** One WAV holding all packets of `text`, `gap` seconds of silence between them. */
-function textToWav(text, opts = {}) {
+export function textToWav(text: string, opts: AudioOptions = {}): { wav: Buffer } & AudioResult {
   const gap = opts.gap == null ? 1.5 : opts.gap;
   const parts = textToPackets(text, opts).map((p, i) => halvesToPcm(packetHalves(p), { silence: i ? gap / 2 : 0.05 }));
   const pcm = Buffer.concat(parts);
@@ -138,12 +159,12 @@ function textToWav(text, opts = {}) {
 }
 
 /** Play a WAV on the default output and resolve when it has finished. */
-function playWav(wav) {
+export function playWav(wav: Buffer): Promise<void> {
   const file = path.join(os.tmpdir(), `a2kbda_${process.pid}_${Date.now()}.wav`);
   fs.writeFileSync(file, wav);
   const done = () => { try { fs.unlinkSync(file); } catch (e) {} };
-  let cmd;
-  let args;
+  let cmd: string;
+  let args: string[];
   if (process.platform === 'win32') {
     // winsound is in Python's standard library on Windows - nothing to install
     cmd = process.env.PYTHON || 'python';
@@ -170,11 +191,12 @@ function playWav(wav) {
  * microseconds, little endian, and plays them into $C060 on the emulated
  * CPU's clock. Packets go one at a time, `gap` seconds apart, as on the wire.
  */
-function sendHalvesToBoard(packetsHalves, { host, port = 6503, gap = 1.5 } = {}) {
-  const net = require('net');
-  const SerialBridge = require('./bridge');
+export function sendHalvesToBoard(
+  packetsHalves: number[][],
+  { host, port = 6503, gap = 1.5 }: { host: string; port?: number; gap?: number }
+): Promise<AudioResult> {
   return new Promise((resolve, reject) => {
-    const opts = { host, port };
+    const opts: net.TcpNetConnectOpts = { host, port };
     const local = SerialBridge.linkLocalSource(host);
     if (local) opts.localAddress = local;
     const sock = net.connect(opts);
@@ -198,14 +220,14 @@ function sendHalvesToBoard(packetsHalves, { host, port = 6503, gap = 1.5 } = {})
   });
 }
 
-let queue = Promise.resolve();
+let queue: Promise<unknown> = Promise.resolve();
 /**
  * Type text on the Apple through its cassette input; calls go one after
  * another. opts.board = { host, port } sends the signal to the STM32 board
  * instead of playing it on the PC's audio output.
  */
-function typeByAudio(text, opts = {}) {
-  const run = async () => {
+export function typeByAudio(text: string, opts: AudioOptions = {}): Promise<AudioResult> {
+  const run = async (): Promise<AudioResult> => {
     if (opts.board) {
       const halves = textToPackets(text, opts).map(packetHalves);
       return sendHalvesToBoard(halves, { ...opts.board, gap: opts.gap });
@@ -219,8 +241,6 @@ function typeByAudio(text, opts = {}) {
   return p;
 }
 
-module.exports = { packetHalves, halvesToPcm, wavFile, textToPackets, textToWav, playWav, sendHalvesToBoard, typeByAudio, RATE };
-
 if (require.main === module) {
   const [cmd, text, out] = process.argv.slice(2);
   if (cmd === 'wav' && text) {
@@ -228,11 +248,11 @@ if (require.main === module) {
     fs.writeFileSync(out || 'a2kbda.wav', r.wav);
     console.log(`${out || 'a2kbda.wav'}: ${r.packets} packet(s), ${r.seconds.toFixed(2)} s`);
   } else if (cmd === 'play' && text) {
-    typeByAudio(text).then((r) => console.log(`played ${r.packets} packet(s), ${r.seconds.toFixed(2)} s`), (e) => { console.error(e.message); process.exit(1); });
+    typeByAudio(text).then((r) => console.log(`played ${r.packets} packet(s), ${r.seconds.toFixed(2)} s`), (e: Error) => { console.error(e.message); process.exit(1); });
   } else if (cmd === 'board' && text) {
     const host = out || process.env.BRIDGE_HOST || '169.254.246.139';
-    typeByAudio(text, { board: { host } }).then((r) => console.log(`sent ${r.packets} packet(s) to ${host}:6503, ${r.seconds.toFixed(2)} s`), (e) => { console.error(e.message); process.exit(1); });
+    typeByAudio(text, { board: { host } }).then((r) => console.log(`sent ${r.packets} packet(s) to ${host}:6503, ${r.seconds.toFixed(2)} s`), (e: Error) => { console.error(e.message); process.exit(1); });
   } else {
-    console.log('usage: node audio_keys.js play "CATALOG" | wav "CATALOG" out.wav | board "CATALOG" [host]');
+    console.log('usage: node dist/audio_keys.js play "CATALOG" | wav "CATALOG" out.wav | board "CATALOG" [host]');
   }
 }

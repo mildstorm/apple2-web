@@ -2,21 +2,32 @@
   "name": "apple2-web",
   "version": "1.0.0",
   "description": "Apple II DOS 3.3 Web Disk File Manager, 3-Column Hex Editor & 6502 Disassembler",
-  "main": "server.js",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node server.js",
-    "start:stm32": "node server.js --stm32",
-    "remote:dump": "node remote_disk.js dump",
-    "remote:quit": "node remote_disk.js quit",
+    "build": "npm run build:server",
+    "build:server": "tsc -p src/server",
+    "start": "node dist/server.js",
+    "start:stm32": "node dist/server.js --stm32",
+    "remote:dump": "node dist/remote_disk.js dump",
+    "remote:quit": "node dist/remote_disk.js quit",
     "build:a2srv": "xa -o apple2/a2srv.bin apple2/a2srv.s",
     "build:a2kbda": "xa -o apple2/a2kbda.bin apple2/a2kbda.s",
     "build:remote-dsk": "python build_remote_dsk.py",
     "test:audio": "python tools/test_a2kbda.py",
     "upload:stm32": "pwsh -File ../STM32CubeIDE/STM32F769I-DISCO/tools/sd-upload.ps1 apple2-web.dsk -Name A2WEB.DSK",
-    "test": "node test_runner.js",
+    "test": "node dist/test_runner.js",
     "build:dsk": "python build_dsk.py"
   },
-  "keywords": ["apple2", "dos3.3", "hex-editor", "disassembler", "6502", "applesoft", "applewin", "ssc"],
+  "keywords": [
+    "apple2",
+    "dos3.3",
+    "hex-editor",
+    "disassembler",
+    "6502",
+    "applesoft",
+    "applewin",
+    "ssc"
+  ],
   "author": "mildstorm",
   "license": "MIT",
   "dependencies": {
@@ -25,5 +36,10 @@
   },
   "optionalDependencies": {
     "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   }
 }

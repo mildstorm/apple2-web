@@ -1,6 +1,6 @@
 /**
- * bridge.js - Apple II Super Serial Card (SSC) Bridge Engine
- * 
+ * bridge.ts - Apple II Super Serial Card (SSC) Bridge Engine
+ *
  * Supports:
  * - TCP Client mode: Connects to AppleWin SSC TCP listening port (default: 127.0.0.1:1977)
  * - TCP Server mode: Listens on TCP port for incoming Apple II / emulator connections
@@ -10,12 +10,71 @@
  * - Built-in HTTP request parsing & command dispatch
  */
 
-const net = require('net');
-const os = require('os');
-const EventEmitter = require('events');
+import * as net from 'net';
+import * as os from 'os';
+import { EventEmitter } from 'events';
 
-class SerialBridge extends EventEmitter {
-  constructor(options = {}) {
+export type BridgeMode = 'tcp-client' | 'tcp-server' | 'serial';
+
+export interface SerialBridgeOptions {
+  mode?: BridgeMode;
+  tcpHost?: string;
+  tcpPort?: number;
+  localAddress?: string | null;
+  listenHost?: string | null;
+  serialPort?: string | null;
+  baudRate?: number;
+  reconnectInterval?: number;
+}
+
+export interface BridgeStats {
+  bytesRx: number;
+  bytesTx: number;
+  packetsRx: number;
+  packetsTx: number;
+  connectedAt: Date | null;
+  lastRxAt: Date | null;
+  lastTxAt: Date | null;
+  reconnectAttempts: number;
+}
+
+export interface BridgeStatus {
+  mode: BridgeMode;
+  target: string | null;
+  connected: boolean;
+  stats: BridgeStats;
+}
+
+/** The part of the optional `serialport` package's SerialPort used here. */
+interface SerialPortLike {
+  isOpen: boolean;
+  on(event: 'open' | 'close', cb: () => void): unknown;
+  on(event: 'data', cb: (data: Buffer) => void): unknown;
+  on(event: 'error', cb: (err: Error) => void): unknown;
+  write(data: Buffer): unknown;
+  close(): void;
+}
+type SerialPortModule = { SerialPort: new (opts: { path: string; baudRate: number }) => SerialPortLike };
+
+export class SerialBridge extends EventEmitter {
+  mode: BridgeMode;
+  tcpHost: string;
+  tcpPort: number;
+  localAddress: string | null;
+  listenHost: string | null;
+  serialPortName: string | null;
+  baudRate: number;
+  reconnectInterval: number;
+
+  socket: net.Socket | null;
+  server: net.Server | null;
+  serialPort: SerialPortLike | null;
+  isConnected: boolean;
+  reconnectTimer: NodeJS.Timeout | null;
+  rxBuffer: string;
+  stats: BridgeStats;
+
+  constructor(options: SerialBridgeOptions = {}) {
     super();
     this.mode = options.mode || 'tcp-client'; // 'tcp-client', 'tcp-server', 'serial'
     this.tcpHost = options.tcpHost || '127.0.0.1';
@@ -46,7 +105,7 @@ class SerialBridge extends EventEmitter {
     };
   }
 
-  start() {
+  start(): void {
     if (this.mode === 'tcp-client') {
       this._startTcpClient();
     } else if (this.mode === 'tcp-server') {
@@ -59,7 +118,7 @@ class SerialBridge extends EventEmitter {
   }
 
   // --- TCP Client Mode (AppleWin default) ---
-  _startTcpClient() {
+  _startTcpClient(): void {
     this._clearReconnect();
     console.log(`[Bridge] Connecting to AppleWin SSC at ${this.tcpHost}:${this.tcpPort}...`);
 
@@ -74,11 +133,11 @@ class SerialBridge extends EventEmitter {
       this.emit('connected', { target: `${this.tcpHost}:${this.tcpPort}`, mode: this.mode });
     });
 
-    socket.on('data', (data) => {
+    socket.on('data', (data: Buffer) => {
       this._handleIncomingData(data);
     });
 
-    socket.on('error', (err) => {
+    socket.on('error', (err: NodeJS.ErrnoException) => {
       // Avoid spamming error stack if AppleWin is simply not started yet
       if (err.code === 'ECONNREFUSED') {
         // Normal when AppleWin is not running yet
@@ -97,7 +156,7 @@ class SerialBridge extends EventEmitter {
       this._scheduleReconnect();
     });
 
-    const connectOpts = {
+    const connectOpts: net.TcpNetConnectOpts = {
       host: this.tcpHost,
       port: this.tcpPort
     };
@@ -110,7 +169,7 @@ class SerialBridge extends EventEmitter {
     socket.connect(connectOpts);
   }
 
-  _scheduleReconnect() {
+  _scheduleReconnect(): void {
     if (this.reconnectTimer) return;
     this.stats.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
@@ -121,7 +180,7 @@ class SerialBridge extends EventEmitter {
     }, this.reconnectInterval);
   }
 
-  _clearReconnect() {
+  _clearReconnect(): void {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -129,7 +188,7 @@ class SerialBridge extends EventEmitter {
   }
 
   // --- TCP Server Mode ---
-  _startTcpServer() {
+  _startTcpServer(): void {
     this.server = net.createServer((sock) => {
       console.log(`[Bridge] Client connected from ${sock.remoteAddress}:${sock.remotePort}`);
       if (this.socket) {
@@ -141,7 +200,7 @@ class SerialBridge extends EventEmitter {
       this.stats.connectedAt = new Date();
       this.emit('connected', { target: `${sock.remoteAddress}:${sock.remotePort}`, mode: this.mode });
 
-      sock.on('data', (data) => {
+      sock.on('data', (data: Buffer) => {
         this._handleIncomingData(data);
       });
 
@@ -166,38 +225,40 @@ class SerialBridge extends EventEmitter {
   }
 
   // --- Serial Port Mode (Hardware / Virtual COM) ---
-  _startSerial() {
+  _startSerial(): void {
     try {
-      const { SerialPort } = require('serialport');
+      // Optional dependency: loaded only when serial mode is used.
+      const { SerialPort } = require('serialport') as SerialPortModule;
       console.log(`[Bridge] Opening Serial Port ${this.serialPortName} @ ${this.baudRate} baud...`);
-      this.serialPort = new SerialPort({
-        path: this.serialPortName,
+      const serialPort = new SerialPort({
+        path: this.serialPortName as string,
         baudRate: this.baudRate
       });
+      this.serialPort = serialPort;
 
-      this.serialPort.on('open', () => {
+      serialPort.on('open', () => {
         this.isConnected = true;
         this.stats.connectedAt = new Date();
         console.log(`[Bridge] Serial Port ${this.serialPortName} opened.`);
         this.emit('connected', { target: this.serialPortName, mode: this.mode });
       });
 
-      this.serialPort.on('data', (data) => {
+      serialPort.on('data', (data: Buffer) => {
         this._handleIncomingData(data);
       });
 
-      this.serialPort.on('error', (err) => {
+      serialPort.on('error', (err: Error) => {
         console.error(`[Bridge] Serial error: ${err.message}`);
         this.emit('error', err);
       });
 
-      this.serialPort.on('close', () => {
+      serialPort.on('close', () => {
         this.isConnected = false;
         console.log('[Bridge] Serial port closed.');
         this.emit('disconnected');
       });
     } catch (err) {
-      console.error(`[Bridge] serialport module error: ${err.message}`);
+      console.error(`[Bridge] serialport module error: ${(err as Error).message}`);
       console.log('[Bridge] Falling back to TCP client mode.');
       this.mode = 'tcp-client';
       this._startTcpClient();
@@ -205,7 +266,7 @@ class SerialBridge extends EventEmitter {
   }
 
   // --- Data Ingestion & Normalization ---
-  _handleIncomingData(buffer) {
+  _handleIncomingData(buffer: Buffer): void {
     this.stats.bytesRx += buffer.length;
     this.stats.packetsRx++;
     this.stats.lastRxAt = new Date();
@@ -222,7 +283,7 @@ class SerialBridge extends EventEmitter {
     // Accumulate in line buffer (Apple II lines end with \r or \r\n)
     this.rxBuffer += cleanStr;
 
-    let crIndex;
+    let crIndex: number;
     while ((crIndex = this.rxBuffer.search(/[\r\n]/)) !== -1) {
       const line = this.rxBuffer.slice(0, crIndex).trim();
       // Skip delimiter
@@ -238,7 +299,7 @@ class SerialBridge extends EventEmitter {
     }
   }
 
-  _processLine(line) {
+  _processLine(line: string): void {
     this.emit('line', line);
 
     // Detect HTTP Request
@@ -258,12 +319,12 @@ class SerialBridge extends EventEmitter {
   }
 
   // --- Sending to Apple II ---
-  send(data) {
+  send(data: Buffer | string): boolean {
     if (!this.isConnected) {
       return false;
     }
 
-    let buf;
+    let buf: Buffer;
     if (Buffer.isBuffer(data)) {
       buf = data;
     } else {
@@ -286,14 +347,14 @@ class SerialBridge extends EventEmitter {
     return false;
   }
 
-  sendLine(str = '') {
+  sendLine(str = ''): boolean {
     // Apple II terminal prefers \r\n or \r
     return this.send(str + '\r\n');
   }
 
-  sendHttp(statusCode, statusText, contentType, bodyText) {
+  sendHttp(statusCode: number, statusText: string, contentType: string, bodyText: string): boolean {
     const payload = `${bodyText}\r\n`;
-    const resp = 
+    const resp =
       `HTTP/1.0 ${statusCode} ${statusText}\r\n` +
       `Content-Type: ${contentType}\r\n` +
       `Content-Length: ${Buffer.byteLength(payload, 'ascii')}\r\n` +
@@ -303,7 +364,7 @@ class SerialBridge extends EventEmitter {
     return this.send(resp);
   }
 
-  getStatus() {
+  getStatus(): BridgeStatus {
     return {
       mode: this.mode,
       target: this.mode === 'serial' ? this.serialPortName : `${this.tcpHost}:${this.tcpPort}`,
@@ -312,7 +373,7 @@ class SerialBridge extends EventEmitter {
     };
   }
 
-  stop() {
+  stop(): void {
     this._clearReconnect();
     if (this.socket) {
       this.socket.destroy();
@@ -328,30 +389,30 @@ class SerialBridge extends EventEmitter {
     }
     this.isConnected = false;
   }
-}
 
-/**
- * A link-local board (169.254.x.x, the STM32 on a direct cable) is only
- * reachable from the PC's own link-local address, and Windows does not always
- * pick that one as the source. Returns the address to bind, or null.
- * BRIDGE_LOCAL_ADDR overrides the search.
- */
-SerialBridge.linkLocalSource = function (host) {
-  if (process.env.BRIDGE_LOCAL_ADDR) return process.env.BRIDGE_LOCAL_ADDR;
-  if (!host || !host.startsWith('169.254.')) return null;
-  try {
-    const ifaces = os.networkInterfaces();
-    for (const name of Object.keys(ifaces)) {
-      const lname = name.toLowerCase();
-      if (lname.includes('tailscale') || lname.includes('bluetooth')) continue;
-      for (const addr of ifaces[name]) {
-        if (addr.family === 'IPv4' && !addr.internal && addr.address.startsWith('169.254.')) {
-          return addr.address;
+  /**
+   * A link-local board (169.254.x.x, the STM32 on a direct cable) is only
+   * reachable from the PC's own link-local address, and Windows does not always
+   * pick that one as the source. Returns the address to bind, or null.
+   * BRIDGE_LOCAL_ADDR overrides the search.
+   */
+  static linkLocalSource(host: string | null | undefined): string | null {
+    if (process.env.BRIDGE_LOCAL_ADDR) return process.env.BRIDGE_LOCAL_ADDR;
+    if (!host || !host.startsWith('169.254.')) return null;
+    try {
+      const ifaces = os.networkInterfaces();
+      for (const name of Object.keys(ifaces)) {
+        const lname = name.toLowerCase();
+        if (lname.includes('tailscale') || lname.includes('bluetooth')) continue;
+        for (const addr of ifaces[name]!) {
+          if (addr.family === 'IPv4' && !addr.internal && addr.address.startsWith('169.254.')) {
+            return addr.address;
+          }
         }
       }
-    }
-  } catch (e) {}
-  return null;
-};
+    } catch (e) {}
+    return null;
+  }
+}
 
-module.exports = SerialBridge;
+export default SerialBridge;
